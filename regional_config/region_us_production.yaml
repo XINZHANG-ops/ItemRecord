@@ -1,0 +1,36 @@
+# Parametrization is typically applied to project and dataset names as they are dynamic, while table names are static. 
+email: ['xinzhang@geotab.com', 'daniellewis@geotab.com', 'shadimahdiani@geotab.com', 'kyleweston@geotab.com']
+
+# Destination Tables
+target_project: geotab-planet-prod
+target_dataset: ColumnLookup_US
+
+# labels
+zone: prod
+
+# Source Tables
+source_project: geotab-planet-prod
+sources_tables:
+  DailyEVSA: SegregatedTables_EU
+  DeviceGroups: SegregatedTables_EU
+  EVChargeWindows: SegregatedTables_EU
+  EVCharges: SegregatedTables_EU
+  EVIdentification: SegregatedTables_EU
+  EVTrips: SegregatedTables_EU
+  Exceptions: MyGeotab_US
+  FaultData: MyGeotab_US
+  FleetSafety_Daily: SegregatedTables_EU
+  GpsLogs: MyGeotab_US
+  LatestVehicleMetadata: SegregatedTables_EU
+  MaintenanceIssues_Daily: SegregatedTables_EU
+  Rule: MyGeotab_US
+  StatusData: MyGeotab_US
+  Trip: MyGeotab_US
+  VehicleKPI_Daily: SegregatedTables_EU
+  VehicleKPI_Hourly: SegregatedTables_EU
+  VehicleSafety_Daily: SegregatedTables_EU
+  Zones: MyGeotab_US
+
+# It is recommended to use individual emails when releasing the
+# DAG to staging and team emails when releasing to production
+email_recipients: ["xinzhang@geotab.com"]
