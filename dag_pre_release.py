@@ -173,7 +173,7 @@ if __name__ == "__main__":
 
     # get region, stage from env variables
     wop_region = os.getenv('WOP_REGION')
-    wop_region = "eu" # us, eu, northamerica-northeast1
+    wop_region = "us" # us, eu, northamerica-northeast1
 
     wop_stage = os.getenv('WOP_STAGE')
     wop_stage = "staging"
