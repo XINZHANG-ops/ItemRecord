@@ -3,7 +3,7 @@ email: ['xinzhang@geotab.com', 'daniellewis@geotab.com', 'shadimahdiani@geotab.c
 
 # Destination Tables
 target_project: geotab-planet-test
-target_dataset: ColumnLookup_EU_Staging
+target_dataset: ColumnLookup_EU
 
 # labels
 zone: test
@@ -11,6 +11,7 @@ zone: test
 # Source Tables
 source_project: geotab-planet-prod
 sources_tables:
+  Diagnostic: Lookup_EU
   DailyEVSA: EV_EU
   DeviceGroups: AggregatedTables_EU
   EVChargeWindows: EV_EU

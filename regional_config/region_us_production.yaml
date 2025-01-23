@@ -11,6 +11,7 @@ zone: prod
 # Source Tables
 source_project: geotab-planet-prod
 sources_tables:
+  Diagnostic: Lookup_US
   DailyEVSA: SegregatedTables_EU
   DeviceGroups: SegregatedTables_EU
   EVChargeWindows: SegregatedTables_EU

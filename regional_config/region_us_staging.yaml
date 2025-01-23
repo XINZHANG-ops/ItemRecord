@@ -1,9 +1,9 @@
 # Parametrization is typically applied to project and dataset names as they are dynamic, while table names are static. 
-email: ['xinzhang@geotab.com']
+email: ['xinzhang@geotab.com', 'daniellewis@geotab.com', 'shadimahdiani@geotab.com', 'kyleweston@geotab.com']
 
 # Destination Tables
 target_project: geotab-planet-test
-target_dataset: xin_test
+target_dataset: ColumnLookup_US
 
 # labels
 zone: test
@@ -11,6 +11,7 @@ zone: test
 # Source Tables
 source_project: geotab-planet-prod
 sources_tables:
+  Diagnostic: Lookup_US
   DailyEVSA: SegregatedTables_EU
   DeviceGroups: SegregatedTables_EU
   EVChargeWindows: SegregatedTables_EU
