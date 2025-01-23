@@ -64,19 +64,11 @@ UNION ALL
     WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
 UNION ALL 
   SELECT CompanyGuid, ColumnName, ColumnValue 
-    FROM `{{ params.target_project }}.{{ params.target_dataset }}.GpsLogs`
-    WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
-UNION ALL 
-  SELECT CompanyGuid, ColumnName, ColumnValue 
     FROM `{{ params.target_project }}.{{ params.target_dataset }}.Rule`
     WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
 UNION ALL 
   SELECT CompanyGuid, ColumnName, ColumnValue 
     FROM `{{ params.target_project }}.{{ params.target_dataset }}.StatusData`
-    WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
-UNION ALL 
-  SELECT CompanyGuid, ColumnName, ColumnValue 
-    FROM `{{ params.target_project }}.{{ params.target_dataset }}.Trip`
     WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
 UNION ALL 
   SELECT CompanyGuid, ColumnName, ColumnValue 

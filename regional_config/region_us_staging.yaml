@@ -21,12 +21,10 @@ sources_tables:
   Exceptions: MyGeotab_US
   FaultData: MyGeotab_US
   FleetSafety_Daily: SegregatedTables_EU
-  GpsLogs: MyGeotab_US
   LatestVehicleMetadata: SegregatedTables_EU
   MaintenanceIssues_Daily: SegregatedTables_EU
   Rule: MyGeotab_US
   StatusData: MyGeotab_US
-  Trip: MyGeotab_US
   VehicleKPI_Daily: SegregatedTables_EU
   VehicleKPI_Hourly: SegregatedTables_EU
   VehicleSafety_Daily: SegregatedTables_EU
