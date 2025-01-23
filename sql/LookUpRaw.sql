@@ -4,6 +4,10 @@ RETURNS TIMESTAMP AS ('{{ ds }}');
 
 WITH t_all_tables AS (
   SELECT CompanyGuid, ColumnName, ColumnValue 
+    FROM `{{ params.target_project }}.{{ params.target_dataset }}.Diagnostic`
+    WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
+UNION ALL 
+  SELECT CompanyGuid, ColumnName, ColumnValue 
     FROM `{{ params.target_project }}.{{ params.target_dataset }}.DeviceGroups`
     WHERE TIMESTAMP_TRUNC(_PARTITIONTIME, DAY) = f_ExecutionTimeStamp()
 UNION ALL 
