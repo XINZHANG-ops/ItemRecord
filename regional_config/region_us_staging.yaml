@@ -1,5 +1,5 @@
 # Parametrization is typically applied to project and dataset names as they are dynamic, while table names are static. 
-email: ['xinzhang@geotab.com', 'daniellewis@geotab.com', 'shadimahdiani@geotab.com', 'kyleweston@geotab.com']
+email: ['xinzhang@geotab.com']
 
 # Destination Tables
 target_project: geotab-planet-test
