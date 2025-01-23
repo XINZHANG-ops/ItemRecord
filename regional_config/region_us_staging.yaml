@@ -3,7 +3,7 @@ email: ['xinzhang@geotab.com', 'daniellewis@geotab.com', 'shadimahdiani@geotab.c
 
 # Destination Tables
 target_project: geotab-planet-test
-target_dataset: ColumnLookup_US
+target_dataset: xin_test
 
 # labels
 zone: test
