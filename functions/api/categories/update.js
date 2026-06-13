@@ -1,4 +1,4 @@
-const VM_API = "http://129.153.49.141:8080";
+const VM_API = "https://wholesale-arrow-postal-arrival.trycloudflare.com";
 
 export async function onRequestPost(context) {
   try {

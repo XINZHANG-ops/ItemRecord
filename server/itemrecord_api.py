@@ -31,6 +31,7 @@ RECORDS_FILE    = BASE_DIR / "records.jsonl"
 CATEGORIES_FILE = BASE_DIR / "data" / "categories.json"
 PRODUCTS_FILE   = BASE_DIR / "data" / "products.json"
 SCRIPTS_DIR     = BASE_DIR / "ai_scripts"       # AI 生成的临时 Python 脚本存放处
+SESSION_FILE    = BASE_DIR / "ai_session_id.txt"  # 持久化最近一次 AI session，重启不丢
 
 OLLAMA          = "ollama"
 MODEL           = "gemma4:31b-cloud"
@@ -39,7 +40,20 @@ CLAUDE_HOME     = "/home/ubuntu/.chatbot-claude"   # 复用 d2l 的沙盒用户
 # ── 锁 ──────────────────────────────────────────────────────────────────────
 _records_lock  = asyncio.Lock()
 _ai_lock       = asyncio.Lock()       # 同时只能跑一个 AI 分类任务
-_ai_session_id: str | None = None     # 跨请求 resume（若上次任务失败可续）
+
+
+def _load_session_id() -> str | None:
+    """从文件读取上次 AI session id，实现跨请求、跨重启的对话记忆。"""
+    try:
+        s = SESSION_FILE.read_text().strip()
+        return s if s else None
+    except FileNotFoundError:
+        return None
+
+
+def _save_session_id(sid: str) -> None:
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FILE.write_text(sid)
 
 app = FastAPI()
 app.add_middleware(
@@ -127,6 +141,18 @@ class CategoryUpdateResponse(BaseModel):
     error: str | None = None
 
 
+@app.get("/api/categories/session")
+async def get_session():
+    sid = _load_session_id()
+    return {"session_id": sid, "has_history": sid is not None}
+
+
+@app.delete("/api/categories/session")
+async def clear_session():
+    SESSION_FILE.unlink(missing_ok=True)
+    return {"ok": True}
+
+
 @app.post("/api/categories/update", response_model=CategoryUpdateResponse)
 async def update_categories(req: CategoryUpdateRequest):
     if _ai_lock.locked():
@@ -138,13 +164,20 @@ async def update_categories(req: CategoryUpdateRequest):
     products = json.loads(PRODUCTS_FILE.read_text())
     current_cats = json.loads(CATEGORIES_FILE.read_text()) if CATEGORIES_FILE.exists() else {}
 
+    # 自动 resume：前端传了 session_id 就用，没传就读持久化文件
+    session_id = req.session_id or _load_session_id()
+
     async with _ai_lock:
         session_id, new_cats, stats, error = await _run_ai_categorize(
             instruction=req.instruction,
             products=products,
             current_categories=current_cats,
-            session_id=req.session_id,
+            session_id=session_id,
         )
+
+        # 无论成败都持久化 session_id，下次对话能续上
+        if session_id:
+            _save_session_id(session_id)
 
         if error:
             return CategoryUpdateResponse(
