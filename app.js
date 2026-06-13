@@ -178,6 +178,32 @@ const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clampQty = (n) => Math.max(-9999, Math.min(9999, n));
 
+// 弹窗打开时锁住背景滚动（iOS 用 position:fixed 才可靠）。计数器支持弹窗叠加（如记录上再开密码框）。
+let _scrollLockY = 0;
+let _scrollLocks = 0;
+function lockScroll() {
+  if (_scrollLocks === 0) {
+    _scrollLockY = window.scrollY;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${_scrollLockY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+  }
+  _scrollLocks++;
+}
+function unlockScroll() {
+  _scrollLocks = Math.max(0, _scrollLocks - 1);
+  if (_scrollLocks === 0) {
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    window.scrollTo(0, _scrollLockY);
+  }
+}
+
 function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return 'r-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -717,11 +743,16 @@ async function confirmAiCategories() {
 
 /* ---------------- 记录查看 ---------------- */
 async function openRecords() {
+  const wasHidden = $('#recordsOverlay').hidden;
   $('#recordsOverlay').hidden = false;
+  if (wasHidden) lockScroll();   // openRecords 也用于删除/清空后刷新，避免重复加锁
   setRecordsView('current');
   await renderCurrentRecords();
 }
-function closeRecords() { $('#recordsOverlay').hidden = true; }
+function closeRecords() {
+  if (!$('#recordsOverlay').hidden) unlockScroll();
+  $('#recordsOverlay').hidden = true;
+}
 
 // 切换「当前记录 / 完整溯源」两个视图（导出/清空只对当前记录有意义）
 function setRecordsView(view) {
