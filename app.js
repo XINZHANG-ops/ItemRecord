@@ -413,6 +413,16 @@ function removeFromCart(barcode) {
   renderGrid();
 }
 
+// 正负切换：iOS 数字键盘无减号键，靠此按钮把数量翻成负数（出库）/正数（入库）
+function toggleSign(barcode) {
+  const item = state.cart.get(barcode);
+  if (!item) return;
+  item.qty = -item.qty;
+  persistCart();
+  renderCart();
+  renderGrid();
+}
+
 function renderCart() {
   // 数量可正可负，合计意义不大；徽标显示车里"有几样商品"
   const count = state.cart.size;
@@ -441,6 +451,7 @@ function renderCart() {
         <input type="text" inputmode="numeric" pattern="-?[0-9]*" value="${it.qty}" data-bc="${esc(it.barcode)}" aria-label="数量" />
         <button data-act="inc" data-bc="${esc(it.barcode)}">＋</button>
       </div>
+      <button class="ci-sign" data-act="sign" data-bc="${esc(it.barcode)}" aria-label="正负切换">±</button>
       <button class="ci-del" data-act="del" data-bc="${esc(it.barcode)}" aria-label="删除">🗑</button>
     </div>`).join('');
 
@@ -449,6 +460,7 @@ function renderCart() {
     btn.addEventListener('click', () => {
       if (btn.dataset.act === 'inc') changeQty(bc, 1);
       else if (btn.dataset.act === 'dec') changeQty(bc, -1);
+      else if (btn.dataset.act === 'sign') toggleSign(bc);
       else removeFromCart(bc);
     });
   });
