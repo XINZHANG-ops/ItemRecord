@@ -35,7 +35,7 @@ HISTORY_FILE    = BASE_DIR / "ai_chat_history.json"   # 持久化对话历史
 SCRIPT_FILE     = BASE_DIR / "ai_categorize.py"       # AI 生成的分类脚本（可查看调试）
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
-MODEL           = "gemma4:31b-cloud"
+MODEL           = "kimi-k2.7-code:cloud"
 
 # ── 锁 ───────────────────────────────────────────────────────────────────────
 _records_lock   = asyncio.Lock()
