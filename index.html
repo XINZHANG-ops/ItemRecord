@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -21,7 +21,7 @@
     </div>
     <div class="topbar-right">
       <button id="addProductBtn" class="ghost-btn">＋ 新增商品</button>
-      <button id="aiCatBtn" class="ghost-btn">AI 分类</button>
+      <button id="aiCatBtn" class="ghost-btn">自动分类</button>
       <button id="recordsBtn" class="ghost-btn">存货记录</button>
       <button id="cartBtn" class="cart-btn" aria-label="购物车">
         🛒<span id="cartBadge" class="cart-badge" hidden>0</span>
@@ -100,11 +100,11 @@
   <!-- AI 分类弹窗 -->
   <div id="aiCatOverlay" class="modal-overlay" hidden>
     <div class="modal" role="dialog" aria-modal="true">
-      <h2 class="modal-title">AI 更新分类规则</h2>
+      <h2 class="modal-title">自动更新分类规则</h2>
       <p id="aiCatHistoryInfo" class="modal-sub"></p>
       <label class="field">
         <span>你的指令</span>
-        <textarea id="aiCatInstruction" rows="4" placeholder="例如：把所有含"挂件"的商品归入配饰系列；把巴塞罗熊和邦尼兔单独拆成一个顶级分类" style="resize:vertical;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;width:100%;"></textarea>
+        <textarea id="aiCatInstruction" rows="4" placeholder="例如：把所有含「挂件」的商品归入配饰系列；把巴塞罗熊和邦尼兔单独拆成一个顶级分类" style="resize:vertical;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;width:100%;"></textarea>
       </label>
       <div id="aiCatResult" class="ai-cat-result" hidden></div>
       <div class="modal-actions" style="margin-top:18px">
@@ -120,7 +120,10 @@
     <div class="modal modal-wide" role="dialog" aria-modal="true">
       <div class="modal-head-row">
         <h2 class="modal-title">存货记录</h2>
-        <button id="recordsClose" class="ghost-btn">关闭</button>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="recordsClear" class="ghost-btn" style="color:#c0392b">清空记录</button>
+          <button id="recordsClose" class="ghost-btn">关闭</button>
+        </div>
       </div>
       <div id="recordsList" class="records-list"></div>
       <div id="recordsEmpty" class="records-empty">还没有任何记录。</div>
@@ -131,6 +134,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

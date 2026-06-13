@@ -86,6 +86,16 @@ const store = {
     }
   },
 
+  // 清空所有存货记录（不可恢复）
+  async clearRecords() {
+    const res = await fetch('/api/records', { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
   // 刷新时把离线暂存的记录补提交
   async flushPendingRecords() {
     const key = 'itemrecord.pendingRecords';
@@ -604,6 +614,21 @@ async function openRecords() {
 }
 function closeRecords() { $('#recordsOverlay').hidden = true; }
 
+async function clearRecords() {
+  if (!confirm('确定清空全部存货记录吗？\n\n此操作不可恢复，所有记录将被永久删除。')) return;
+  const btn = $('#recordsClear');
+  btn.disabled = true;
+  try {
+    const res = await store.clearRecords();
+    toast(`已清空 ${res.cleared ?? 0} 条记录`);
+    await openRecords();   // 重新拉取并刷新列表（此时应为空）
+  } catch (e) {
+    toast(`清空失败：${e.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 /* ---------------- 轻提示 ---------------- */
 let toastTimer = null;
 function toast(msg) {
@@ -644,6 +669,7 @@ async function init() {
   $('#submitConfirm').addEventListener('click', confirmSubmit);
   $('#recordsBtn').addEventListener('click', openRecords);
   $('#recordsClose').addEventListener('click', closeRecords);
+  $('#recordsClear').addEventListener('click', clearRecords);
   $('#addProductBtn').addEventListener('click', openAddProduct);
   $('#addCancel').addEventListener('click', closeAddProduct);
   $('#addConfirm').addEventListener('click', confirmAddProduct);

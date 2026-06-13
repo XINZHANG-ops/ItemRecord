@@ -211,6 +211,17 @@ async def save_record(rec: RecordIn):
     return {"ok": True, "duplicate": False}
 
 
+@app.delete("/api/records")
+async def clear_records():
+    """清空所有存货记录（不可恢复）。"""
+    async with _records_lock:
+        cleared = 0
+        if RECORDS_FILE.exists():
+            cleared = sum(1 for line in RECORDS_FILE.read_text().splitlines() if line.strip())
+            RECORDS_FILE.unlink()
+    return {"ok": True, "cleared": cleared}
+
+
 # ── AI 分类历史管理 ───────────────────────────────────────────────────────────
 @app.get("/api/categories/history")
 async def get_history():
