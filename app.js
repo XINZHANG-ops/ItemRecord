@@ -806,7 +806,7 @@ function toast(msg) {
 /* ---------------- 密码防护（自动分类 / 清空记录） ---------------- */
 // 管理密码：保护「自动分类」入口与「清空记录」操作，防止普通用户误改/误删。
 // 改密码只需改这一行（纯前端门禁，面向非技术用户，足够拦住误操作）。
-const ADMIN_PASSWORD = '123';
+const ADMIN_PASSWORD = '119';
 let pwPendingAction = null;
 
 function requirePassword(title, action) {
