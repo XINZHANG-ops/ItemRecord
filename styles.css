@@ -290,26 +290,40 @@ button { font-family: inherit; cursor: pointer; }
   letter-spacing: .3px;
 }
 
-.card-add {
+.card-stepper {
   margin-top: auto;
-  border: 1px solid var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+  height: 34px;
+}
+.card-stepper.active { border-color: var(--brand); }
+.card-step {
+  border: none;
   background: var(--brand-soft);
   color: var(--brand);
-  height: 34px;
-  border-radius: 9px;
-  font-size: 13px;
+  width: 40px;
+  height: 100%;
+  font-size: 20px;
+  line-height: 1;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   transition: background .12s, color .12s;
 }
-.card-add:hover { background: var(--brand); color: #fff; }
-.card-add.in-cart {
-  background: #fff;
-  border-color: var(--line);
-  color: var(--ink-soft);
+.card-step:hover:not(:disabled) { background: var(--brand); color: #fff; }
+.card-step:disabled { color: var(--line); cursor: default; background: #fafafa; }
+.card-qty {
+  flex: 1;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
 }
 
 .empty-state {

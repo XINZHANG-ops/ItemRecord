@@ -314,7 +314,7 @@ function renderGrid() {
   empty.hidden = true;
 
   grid.innerHTML = list.map((p) => {
-    const inCart = state.cart.has(p.barcode);
+    const qty = state.cart.get(p.barcode)?.qty || 0;
     const first = (p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0];
     const isNew = p.source === 'custom';
     return `
@@ -323,30 +323,33 @@ function renderGrid() {
         <div class="card-body">
           <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
           <div class="card-barcode">${esc(p.barcode)}</div>
-          <button class="card-add${inCart ? ' in-cart' : ''}" data-barcode="${esc(p.barcode)}">
-            ${inCart ? '已加入 ✓' : '＋ 加入'}
-          </button>
+          <div class="card-stepper${qty > 0 ? ' active' : ''}">
+            <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="-1" aria-label="减少"${qty === 0 ? ' disabled' : ''}>−</button>
+            <span class="card-qty">${qty}</span>
+            <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="1" aria-label="增加">＋</button>
+          </div>
         </div>
       </div>`;
   }).join('');
 
-  grid.querySelectorAll('.card-add').forEach((btn) => {
-    btn.addEventListener('click', () => addToCart(btn.dataset.barcode));
+  grid.querySelectorAll('.card-step').forEach((btn) => {
+    btn.addEventListener('click', () => stepCard(btn.dataset.barcode, Number(btn.dataset.delta)));
   });
 }
 
 /* ---------------- 购物车 ---------------- */
-function addToCart(barcode) {
-  const p = state.products.find((x) => x.barcode === barcode);
-  if (!p) return;
-  const existing = state.cart.get(barcode);
-  if (existing) {
-    existing.qty += 1;
-  } else {
-    // 记录每件商品被加入的时间
+// 卡片上的 −/＋：首次加入或增减数量，数量为 0 时移出购物车
+function stepCard(barcode, delta) {
+  const item = state.cart.get(barcode);
+  if (!item) {
+    if (delta <= 0) return;
+    const p = state.products.find((x) => x.barcode === barcode);
+    if (!p) return;
     state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: 1, addedAt: new Date().toISOString() });
+  } else {
+    item.qty += delta;
+    if (item.qty <= 0) state.cart.delete(barcode);
   }
-  toast(`已加入：${p.name}`);
   renderCart();
   renderGrid();
 }
