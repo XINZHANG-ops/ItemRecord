@@ -101,13 +101,14 @@
   <div id="aiCatOverlay" class="modal-overlay" hidden>
     <div class="modal" role="dialog" aria-modal="true">
       <h2 class="modal-title">AI 更新分类规则</h2>
-      <p class="modal-sub">用自然语言描述你想怎么调整分类，AI 会读取全部 312 件商品，生成并运行分类脚本，确保每件商品都被正确归类。</p>
+      <p id="aiCatHistoryInfo" class="modal-sub"></p>
       <label class="field">
         <span>你的指令</span>
         <textarea id="aiCatInstruction" rows="4" placeholder="例如：把所有含"挂件"的商品归入配饰系列；把巴塞罗熊和邦尼兔单独拆成一个顶级分类" style="resize:vertical;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;width:100%;"></textarea>
       </label>
       <div id="aiCatResult" class="ai-cat-result" hidden></div>
       <div class="modal-actions" style="margin-top:18px">
+        <button id="aiCatClearHistory" class="ghost-btn" style="margin-right:auto;color:var(--ink-soft)">清除历史</button>
         <button id="aiCatCancel" class="ghost-btn">关闭</button>
         <button id="aiCatConfirm" class="primary-btn">开始更新</button>
       </div>

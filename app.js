@@ -495,13 +495,32 @@ async function confirmAddProduct() {
 }
 
 /* ---------------- AI 更新分类 ---------------- */
-function openAiCategories() {
+async function openAiCategories() {
   $('#aiCatInstruction').value = '';
   $('#aiCatResult').hidden = true;
   $('#aiCatOverlay').hidden = false;
   $('#aiCatInstruction').focus();
+  // 显示当前对话历史轮数
+  try {
+    const h = await fetch('/api/categories/history').then((r) => r.json());
+    $('#aiCatHistoryInfo').textContent = h.turns > 0
+      ? `已有 ${h.turns} 轮对话历史，AI 会在此基础上继续调整`
+      : '新对话，AI 将从当前分类规则开始';
+  } catch {
+    $('#aiCatHistoryInfo').textContent = '';
+  }
 }
 function closeAiCategories() { $('#aiCatOverlay').hidden = true; }
+
+async function clearAiHistory() {
+  try {
+    await fetch('/api/categories/history', { method: 'DELETE' });
+    $('#aiCatHistoryInfo').textContent = '对话历史已清除，下次从零开始';
+    toast('历史已清除');
+  } catch {
+    toast('清除失败');
+  }
+}
 
 async function confirmAiCategories() {
   const instruction = $('#aiCatInstruction').value.trim();
@@ -515,23 +534,22 @@ async function confirmAiCategories() {
   try {
     const res = await store.updateCategories(instruction);
     if (res.ok) {
-      // 更新成功：重新拉取分类并刷新 UI
       state.categories = await store.fetchCategories();
       renderCategoryBar();
       renderGrid();
 
-      // 显示统计摘要
       const stats = res.stats || {};
       const perCat = Object.entries(stats.per_category || {})
         .map(([k, v]) => `${k}：${v} 件`).join('　');
       $('#aiCatResult').innerHTML =
-        `<div class="ai-result-ok">✓ 分类已更新</div>` +
+        `<div class="ai-result-ok">✓ 分类已更新（第 ${res.history_turns} 轮对话）</div>` +
         `<div class="ai-result-stats">${perCat}　未分类：${stats.uncategorized ?? '?'} 件</div>`;
       if (stats.uncategorized_names && stats.uncategorized_names.length) {
         const names = stats.uncategorized_names.slice(0, 10).join('、');
         $('#aiCatResult').innerHTML +=
-          `<div class="ai-result-uncat">未分类商品：${names}${stats.uncategorized_names.length > 10 ? '…' : ''}</div>`;
+          `<div class="ai-result-uncat">未分类：${names}${stats.uncategorized_names.length > 10 ? '…' : ''}</div>`;
       }
+      $('#aiCatHistoryInfo').textContent = `已有 ${res.history_turns} 轮对话历史，AI 会在此基础上继续调整`;
     } else {
       $('#aiCatResult').innerHTML = `<div class="ai-result-err">✗ ${res.message || '更新失败'}</div>`;
     }
@@ -617,6 +635,7 @@ async function init() {
   $('#aiCatBtn').addEventListener('click', openAiCategories);
   $('#aiCatCancel').addEventListener('click', closeAiCategories);
   $('#aiCatConfirm').addEventListener('click', confirmAiCategories);
+  $('#aiCatClearHistory').addEventListener('click', clearAiHistory);
   $('#addName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#addBarcode').focus(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
