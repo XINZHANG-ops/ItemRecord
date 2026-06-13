@@ -35,12 +35,12 @@ HISTORY_FILE    = BASE_DIR / "ai_chat_history.json"   # 持久化对话历史
 SCRIPT_FILE     = BASE_DIR / "ai_categorize.py"       # AI 生成的分类脚本（可查看调试）
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
-MODEL           = "kimi-k2.7-code:cloud"
+MODEL           = "kimi-k2.7-code:cloud"   # 主分类模型（写 Python 代码）
+COMPACT_MODEL   = "kimi-k2.6:cloud"        # 对话历史压缩模型
 
 # ── 锁 ───────────────────────────────────────────────────────────────────────
 _records_lock   = asyncio.Lock()
-_ai_lock        = asyncio.Lock()
-_compact_lock   = asyncio.Lock()   # 压缩时阻塞新的 AI 请求
+_ai_lock        = asyncio.Lock()   # 同时只能跑一个 AI 任务
 _compact_event  = asyncio.Event()  # 压缩完成后通知等待的请求
 _compact_event.set()               # 初始状态：未压缩中，可以直接通过
 
@@ -132,7 +132,7 @@ async def _compact_history_if_needed(history: list[dict]) -> list[dict]:
         )
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(OLLAMA_URL, json={
-                "model": MODEL,
+                "model": COMPACT_MODEL,
                 "messages": [
                     {"role": "system", "content": "你是一个摘要助手，请用中文输出压缩后的对话摘要。"},
                     {"role": "user", "content": compact_prompt},
@@ -243,19 +243,19 @@ class CategoryUpdateResponse(BaseModel):
 
 @app.post("/api/categories/update", response_model=CategoryUpdateResponse)
 async def update_categories(req: CategoryUpdateRequest):
+    # 先判忙再立即加锁，两步之间无 await，保证 409 可靠（asyncio 协作式调度）
     if _ai_lock.locked():
         raise HTTPException(status_code=409, detail="AI 分类任务正在进行中，请稍后再试")
-
     if not PRODUCTS_FILE.exists():
         raise HTTPException(status_code=500, detail=f"找不到商品数据：{PRODUCTS_FILE}")
 
-    # 等待正在进行的压缩完成（最多等 2 分钟）
-    await asyncio.wait_for(_compact_event.wait(), timeout=120)
-
-    products = json.loads(PRODUCTS_FILE.read_text())
-    current_cats = json.loads(CATEGORIES_FILE.read_text()) if CATEGORIES_FILE.exists() else {}
-
     async with _ai_lock:
+        # 等待正在进行的压缩完成（最多等 2 分钟）
+        await asyncio.wait_for(_compact_event.wait(), timeout=120)
+
+        products = json.loads(PRODUCTS_FILE.read_text())
+        current_cats = json.loads(CATEGORIES_FILE.read_text()) if CATEGORIES_FILE.exists() else {}
+
         new_cats, stats, error, history = await _run_ai_categorize(
             instruction=req.instruction,
             products=products,

@@ -537,9 +537,11 @@ async function confirmAiCategories() {
   btn.textContent = 'AI 运行中…';
   $('#aiCatResult').hidden = true;
 
+  let applied = false;
   try {
     const res = await store.updateCategories(instruction);
     if (res.ok) {
+      applied = true;
       state.categories = await store.fetchCategories();
       renderCategoryBar();
       renderGrid();
@@ -555,7 +557,8 @@ async function confirmAiCategories() {
         $('#aiCatResult').innerHTML +=
           `<div class="ai-result-uncat">未分类：${names}${stats.uncategorized_names.length > 10 ? '…' : ''}</div>`;
       }
-      $('#aiCatHistoryInfo').textContent = `已有 ${res.history_turns} 轮对话历史，AI 会在此基础上继续调整`;
+      $('#aiCatHistoryInfo').textContent = `分类已生效（第 ${res.history_turns} 轮）。如需继续调整，输入新指令；否则直接关闭`;
+      $('#aiCatInstruction').value = '';   // 已应用，清空以免再次点击重复执行同一指令
     } else {
       $('#aiCatResult').innerHTML = `<div class="ai-result-err">✗ ${res.message || '更新失败'}</div>`;
     }
@@ -564,8 +567,14 @@ async function confirmAiCategories() {
     $('#aiCatResult').innerHTML = `<div class="ai-result-err">✗ ${e.message}</div>`;
     $('#aiCatResult').hidden = false;
   } finally {
-    btn.disabled = false;
-    btn.textContent = '开始更新';
+    if (applied) {
+      // 已生效，按钮变为禁用的「已应用」，待用户输入新指令再恢复（见 #aiCatInstruction input 监听）
+      btn.disabled = true;
+      btn.textContent = '已应用 ✓';
+    } else {
+      btn.disabled = false;
+      btn.textContent = '开始更新';
+    }
   }
 }
 
@@ -642,6 +651,13 @@ async function init() {
   $('#aiCatCancel').addEventListener('click', closeAiCategories);
   $('#aiCatConfirm').addEventListener('click', confirmAiCategories);
   $('#aiCatClearHistory').addEventListener('click', clearAiHistory);
+  $('#aiCatInstruction').addEventListener('input', () => {
+    const btn = $('#aiCatConfirm');
+    if ($('#aiCatInstruction').value.trim() && btn.textContent === '已应用 ✓') {
+      btn.disabled = false;
+      btn.textContent = '开始更新';
+    }
+  });
   $('#addName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#addBarcode').focus(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
