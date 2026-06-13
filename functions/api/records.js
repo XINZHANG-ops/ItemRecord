@@ -37,9 +37,10 @@ export async function onRequestPost(context) {
   }
 }
 
-export async function onRequestDelete() {
+export async function onRequestDelete(context) {
   try {
-    const res = await fetch(`${VM_API}/api/records`, { method: "DELETE" });
+    const pw = new URL(context.request.url).searchParams.get("pw") || "";
+    const res = await fetch(`${VM_API}/api/records?pw=${encodeURIComponent(pw)}`, { method: "DELETE" });
     const data = await res.text();
     return new Response(data, {
       status: res.status,

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=13" />
+  <link rel="stylesheet" href="styles.css?v=14" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -126,8 +126,13 @@
           <button id="recordsClose" class="ghost-btn">关闭</button>
         </div>
       </div>
+      <div class="records-tabs">
+        <button id="tabCurrent" class="rec-tab active">当前记录</button>
+        <button id="tabAudit" class="rec-tab">完整溯源</button>
+      </div>
       <div id="recordsList" class="records-list"></div>
       <div id="recordsEmpty" class="records-empty">还没有任何记录。</div>
+      <div id="auditTimeline" class="audit-timeline" hidden></div>
     </div>
   </div>
 
@@ -169,6 +174,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

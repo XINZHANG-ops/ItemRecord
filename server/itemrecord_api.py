@@ -29,11 +29,14 @@ from pydantic import BaseModel
 # ── 路径配置 ─────────────────────────────────────────────────────────────────
 BASE_DIR        = Path("/home/ubuntu/itemrecord")
 RECORDS_FILE    = BASE_DIR / "records.jsonl"
+DELETIONS_FILE  = BASE_DIR / "record_deletions.jsonl"  # append-only 删除事件日志（软删除，溯源用）
 CATEGORIES_FILE = BASE_DIR / "data" / "categories.json"
 PRODUCTS_FILE   = BASE_DIR / "data" / "products.json"
 HISTORY_FILE    = BASE_DIR / "ai_chat_history.json"   # 持久化对话历史
 SCRIPT_FILE     = BASE_DIR / "ai_categorize.py"       # AI 生成的分类脚本（可查看调试）
 CATEGORY_HISTORY_DIR = BASE_DIR / "category_version_history"  # 每版分类快照，纯人工应急查看/回滚用，app 不读
+ADMIN_PW_FILE   = BASE_DIR / "admin_password.txt"     # 管理密码，只存 VM，不进客户端代码；改密码改此文件即可
+DEFAULT_ADMIN_PW = "119"
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
 MODEL           = "kimi-k2.7-code:cloud"   # 主分类模型（写 Python 代码）
@@ -153,10 +156,79 @@ async def _compact_history_if_needed(history: list[dict]) -> list[dict]:
         _compact_event.set()  # 解除阻塞
 
 
+# ── 管理密码（只存 VM，不进客户端） ────────────────────────────────────────────
+def _admin_password() -> str:
+    try:
+        pw = ADMIN_PW_FILE.read_text().strip()
+        return pw or DEFAULT_ADMIN_PW
+    except FileNotFoundError:
+        return DEFAULT_ADMIN_PW
+
+
+def _check_pw(pw: str | None) -> bool:
+    return (pw or "") == _admin_password()
+
+
+# ── 记录 / 删除事件 读写 ───────────────────────────────────────────────────────
+def _read_all_records() -> list[dict]:
+    """读 records.jsonl 全部记录（含已软删除的，溯源用）。"""
+    if not RECORDS_FILE.exists():
+        return []
+    out = []
+    for line in RECORDS_FILE.read_text().splitlines():
+        s = line.strip()
+        if s:
+            try:
+                out.append(json.loads(s))
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def _load_deletions() -> list[dict]:
+    if not DELETIONS_FILE.exists():
+        return []
+    out = []
+    for line in DELETIONS_FILE.read_text().splitlines():
+        s = line.strip()
+        if s:
+            try:
+                out.append(json.loads(s))
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def _deleted_ids() -> set:
+    return {d.get("recordId") for d in _load_deletions() if d.get("recordId")}
+
+
+def _append_deletion(record_id: str, mode: str) -> None:
+    """追加一条删除事件（append-only，绝不动 records.jsonl，保证完整溯源）。"""
+    DELETIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    evt = {
+        "recordId": record_id,
+        "deletedAt": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,
+    }
+    with open(DELETIONS_FILE, "a") as f:
+        f.write(json.dumps(evt, ensure_ascii=False) + "\n")
+
+
 # ── 基础路由 ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {"status": "ok", "ai_busy": _ai_lock.locked()}
+
+
+class AuthVerify(BaseModel):
+    password: str = ""
+
+
+@app.post("/api/auth/verify")
+async def auth_verify(req: AuthVerify):
+    """前端密码校验入口（用于新增商品等纯前端操作的门禁）。"""
+    return {"ok": _check_pw(req.password)}
 
 
 @app.get("/api/categories")
@@ -168,17 +240,15 @@ async def get_categories():
 
 @app.get("/api/records")
 async def get_records():
-    if not RECORDS_FILE.exists():
-        return []
-    records = []
-    for line in RECORDS_FILE.read_text().splitlines():
-        line = line.strip()
-        if line:
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                pass
-    return records
+    """当前有效记录（排除已软删除的）。导出 Excel 与默认列表都用这个。"""
+    deleted = _deleted_ids()
+    return [r for r in _read_all_records() if r.get("id") not in deleted]
+
+
+@app.get("/api/records/audit")
+async def get_records_audit():
+    """完整溯源：返回所有记录（含已删）+ 所有删除事件，前端据此画时间线。"""
+    return {"records": _read_all_records(), "deletions": _load_deletions()}
 
 
 # ── 存货记录（append-only + UUID 幂等） ──────────────────────────────────────
@@ -213,14 +283,31 @@ async def save_record(rec: RecordIn):
 
 
 @app.delete("/api/records")
-async def clear_records():
-    """清空所有存货记录（不可恢复）。"""
+async def clear_records(pw: str = ""):
+    """清空：对当前所有有效记录各追加一条删除事件（软删除，数据仍完整保留）。"""
+    if not _check_pw(pw):
+        raise HTTPException(status_code=403, detail="密码错误")
     async with _records_lock:
-        cleared = 0
-        if RECORDS_FILE.exists():
-            cleared = sum(1 for line in RECORDS_FILE.read_text().splitlines() if line.strip())
-            RECORDS_FILE.unlink()
+        deleted = _deleted_ids()
+        active = [r for r in _read_all_records() if r.get("id") and r["id"] not in deleted]
+        for r in active:
+            _append_deletion(r["id"], mode="clear")
+        cleared = len(active)
     return {"ok": True, "cleared": cleared}
+
+
+@app.delete("/api/records/{record_id}")
+async def delete_record(record_id: str, pw: str = ""):
+    """按 id 软删除单条：追加一条删除事件，绝不动原记录（完整溯源）。"""
+    if not _check_pw(pw):
+        raise HTTPException(status_code=403, detail="密码错误")
+    async with _records_lock:
+        if record_id in _deleted_ids():
+            return {"ok": True, "deleted": 0}   # 已删，幂等
+        if record_id not in {r.get("id") for r in _read_all_records()}:
+            return {"ok": True, "deleted": 0}   # 不存在的 id 不记墓碑，避免污染溯源
+        _append_deletion(record_id, mode="single")
+    return {"ok": True, "deleted": 1}
 
 
 # ── AI 分类历史管理 ───────────────────────────────────────────────────────────
@@ -243,6 +330,7 @@ async def clear_history():
 # ── AI 分类更新 ───────────────────────────────────────────────────────────────
 class CategoryUpdateRequest(BaseModel):
     instruction: str
+    password: str = ""
 
 
 class CategoryUpdateResponse(BaseModel):
@@ -255,6 +343,8 @@ class CategoryUpdateResponse(BaseModel):
 
 @app.post("/api/categories/update", response_model=CategoryUpdateResponse)
 async def update_categories(req: CategoryUpdateRequest):
+    if not _check_pw(req.password):
+        raise HTTPException(status_code=403, detail="密码错误")
     # 先判忙再立即加锁，两步之间无 await，保证 409 可靠（asyncio 协作式调度）
     if _ai_lock.locked():
         raise HTTPException(status_code=409, detail="AI 分类任务正在进行中，请稍后再试")

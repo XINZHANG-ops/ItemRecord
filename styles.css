@@ -609,6 +609,56 @@ button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
 }
 .records-empty { padding: 40px; text-align: center; color: var(--ink-soft); }
 
+/* ---------- 记录视图切换 tab ---------- */
+.records-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex: 0 0 auto; }
+.rec-tab {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.rec-tab.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+
+/* ---------- 溯源时间线（GitHub 提交历史那种竖线 + 节点） ---------- */
+.audit-timeline { overflow-y: auto; flex: 1; padding: 2px 0 2px 2px; }
+.tl-event { position: relative; padding: 0 0 14px 24px; }
+.tl-event::before {            /* 连接相邻节点的竖线 */
+  content: '';
+  position: absolute;
+  left: 6px; top: 6px; bottom: -2px;
+  width: 2px;
+  background: var(--line);
+}
+.tl-event:last-child::before { display: none; }
+.tl-dot {
+  position: absolute;
+  left: 0; top: 4px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--line);
+}
+.tl-create .tl-dot { background: var(--ok); }
+.tl-delete .tl-dot { background: var(--danger); }
+.tl-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.tl-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tl-who { font-weight: 700; font-size: 13px; }
+.tl-time { font-size: 11px; color: var(--ink-soft); margin-left: auto; }
+.tl-items { margin-top: 4px; }
+.tl-ref { margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+.tl-badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; line-height: 16px; }
+.tl-badge-del { background: #fdecec; color: var(--danger); }
+.tl-struck .tl-who { color: var(--ink-soft); }
+.tl-struck .tl-items { text-decoration: line-through; opacity: .55; }
+
 /* ---------- 轻提示 ---------- */
 .toast {
   position: fixed;

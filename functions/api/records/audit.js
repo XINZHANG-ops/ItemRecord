@@ -1,14 +1,16 @@
 const VM_API = "https://wholesale-arrow-postal-arrival.trycloudflare.com";
 
-export async function onRequestDelete(context) {
+export async function onRequestGet() {
   try {
-    const id = context.params.id;
-    const pw = new URL(context.request.url).searchParams.get("pw") || "";
-    const res = await fetch(`${VM_API}/api/records/${encodeURIComponent(id)}?pw=${encodeURIComponent(pw)}`, { method: "DELETE" });
+    const res = await fetch(`${VM_API}/api/records/audit`, { cf: { cacheTtl: 0 } });
     const data = await res.text();
     return new Response(data, {
       status: res.status,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-store",
+      },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
@@ -22,7 +24,7 @@ export async function onRequestOptions() {
   return new Response(null, {
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "DELETE, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });

@@ -86,9 +86,20 @@ const store = {
     }
   },
 
-  // 清空所有存货记录（不可恢复）
-  async clearRecords() {
-    const res = await fetch('/api/records', { method: 'DELETE' });
+  // 校验管理密码（真正的密码只在 VM 上，客户端代码不含明文）
+  async verifyPassword(pw) {
+    const res = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();   // { ok: boolean }
+  },
+
+  // 清空所有记录（软删除：后端追加删除事件，数据仍完整保留）
+  async clearRecords(pw = '') {
+    const res = await fetch(`/api/records?pw=${encodeURIComponent(pw)}`, { method: 'DELETE' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(err.detail || err.error || `HTTP ${res.status}`);
@@ -96,14 +107,21 @@ const store = {
     return res.json();
   },
 
-  // 删除单条记录（按 id，不可恢复）
-  async deleteRecord(id) {
-    const res = await fetch(`/api/records/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  // 删除单条记录（软删除：后端追加删除事件，原记录不动）
+  async deleteRecord(id, pw = '') {
+    const res = await fetch(`/api/records/${encodeURIComponent(id)}?pw=${encodeURIComponent(pw)}`, { method: 'DELETE' });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(err.detail || err.error || `HTTP ${res.status}`);
     }
     return res.json();
+  },
+
+  // 完整溯源：所有记录（含已删）+ 所有删除事件
+  async fetchAudit() {
+    const res = await fetch('/api/records/audit', { cache: 'no-store' });
+    if (!res.ok) throw new Error('api error');
+    return res.json();   // { records, deletions }
   },
 
   // 刷新时把离线暂存的记录补提交
@@ -127,12 +145,12 @@ const store = {
     localStorage.setItem(key, JSON.stringify(remaining));
   },
 
-  // AI 更新分类
-  async updateCategories(instruction, sessionId = null) {
+  // AI 更新分类（密码随请求发往后端校验）
+  async updateCategories(instruction, password = '') {
     const res = await fetch('/api/categories/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instruction, session_id: sessionId }),
+      body: JSON.stringify({ instruction, password }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -152,6 +170,7 @@ const state = {
   cart: new Map(),      // barcode -> { barcode, name, qty, addedAt }
   editBarcode: null,    // 当前数量编辑弹窗对应的商品
   editQty: 0,           // 弹窗中的待提交数量（关闭时才落到购物车）
+  recordsView: 'current', // 记录弹窗当前视图：'current' | 'audit'
 };
 
 /* ---------------- 工具 ---------------- */
@@ -657,7 +676,7 @@ async function confirmAiCategories() {
 
   let applied = false;
   try {
-    const res = await store.updateCategories(instruction);
+    const res = await store.updateCategories(instruction, adminPw);
     if (res.ok) {
       applied = true;
       state.categories = await store.fetchCategories();
@@ -698,44 +717,128 @@ async function confirmAiCategories() {
 
 /* ---------------- 记录查看 ---------------- */
 async function openRecords() {
-  const records = await store.fetchRecords();
-  const listEl = $('#recordsList');
-  const emptyEl = $('#recordsEmpty');
-  records.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-  if (!records.length) {
-    listEl.innerHTML = '';
-    emptyEl.hidden = false;
-  } else {
-    emptyEl.hidden = true;
-    listEl.innerHTML = records.map((r) => `
-      <div class="record">
-        <div class="record-head">
-          <span class="record-person">${esc(r.person)}</span>
-          <span class="record-head-right">
-            <span class="record-time">${esc(fmtTime(r.submittedAt))}</span>
-            <button class="record-del" data-id="${esc(r.id || '')}" aria-label="删除此条记录">🗑</button>
-          </span>
-        </div>
-        <div class="record-items">
-          ${r.items.map((it) => `<span class="tag">${esc(it.name)} ×${it.qty}</span>`).join('')}
-        </div>
-      </div>`).join('');
-    // 单条删除：先验密码，再删（密码即确认，不再二次 confirm）
-    listEl.querySelectorAll('.record-del').forEach((btn) => {
-      btn.addEventListener('click', () =>
-        requirePassword('删除此条记录需要密码', () => deleteOneRecord(btn.dataset.id)));
-    });
-  }
   $('#recordsOverlay').hidden = false;
+  setRecordsView('current');
+  await renderCurrentRecords();
 }
 function closeRecords() { $('#recordsOverlay').hidden = true; }
 
-async function deleteOneRecord(id) {
+// 切换「当前记录 / 完整溯源」两个视图（导出/清空只对当前记录有意义）
+function setRecordsView(view) {
+  state.recordsView = view;
+  const current = view === 'current';
+  $('#tabCurrent').classList.toggle('active', current);
+  $('#tabAudit').classList.toggle('active', !current);
+  $('#recordsList').hidden = !current;
+  $('#auditTimeline').hidden = current;
+  $('#recordsEmpty').hidden = true;
+  $('#recordsExport').style.display = current ? '' : 'none';
+  $('#recordsClear').style.display = current ? '' : 'none';
+}
+
+async function renderCurrentRecords() {
+  const listEl = $('#recordsList');
+  const emptyEl = $('#recordsEmpty');
+  let records = [];
+  try { records = await store.fetchRecords(); } catch { /* 离线 → 空 */ }
+  records.sort((a, b) => String(b.submittedAt).localeCompare(String(a.submittedAt)));
+  if (!records.length) {
+    listEl.innerHTML = '';
+    emptyEl.textContent = '还没有任何记录。';
+    emptyEl.hidden = false;
+    return;
+  }
+  emptyEl.hidden = true;
+  listEl.innerHTML = records.map((r) => `
+    <div class="record">
+      <div class="record-head">
+        <span class="record-person">${esc(r.person)}</span>
+        <span class="record-head-right">
+          <span class="record-time">${esc(fmtTime(r.submittedAt))}</span>
+          <button class="record-del" data-id="${esc(r.id || '')}" aria-label="删除此条记录">🗑</button>
+        </span>
+      </div>
+      <div class="record-items">
+        ${r.items.map((it) => `<span class="tag">${esc(it.name)} ×${it.qty}</span>`).join('')}
+      </div>
+    </div>`).join('');
+  // 单条删除：先验密码，再删（密码即确认，不再二次 confirm）
+  listEl.querySelectorAll('.record-del').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      requirePassword('删除此条记录需要密码', (pw) => deleteOneRecord(btn.dataset.id, pw)));
+  });
+}
+
+async function renderAuditView() {
+  const el = $('#auditTimeline');
+  el.innerHTML = '<div class="records-empty">加载中…</div>';
+  let data;
+  try { data = await store.fetchAudit(); }
+  catch { el.innerHTML = '<div class="records-empty">溯源加载失败，请检查网络。</div>'; return; }
+  renderAuditTimeline(data);
+}
+
+// 竖向时间线：新增=绿点、删除=红点，按时间倒序；被删的提交划掉并标「已删除」。
+function renderAuditTimeline(data) {
+  const records = (data && data.records) || [];
+  const deletions = (data && data.deletions) || [];
+  const deletedIds = new Set(deletions.map((d) => d.recordId));
+  const recById = new Map(records.map((r) => [r.id, r]));
+
+  const events = [];
+  for (const r of records) {
+    events.push({ t: r.submittedAt, kind: 'create', record: r, deleted: deletedIds.has(r.id) });
+  }
+  for (const d of deletions) {
+    events.push({ t: d.deletedAt, kind: 'delete', mode: d.mode, record: recById.get(d.recordId) });
+  }
+  events.sort((a, b) => String(b.t || '').localeCompare(String(a.t || '')));
+
+  const el = $('#auditTimeline');
+  if (!events.length) {
+    el.innerHTML = '<div class="records-empty">还没有任何操作。</div>';
+    return;
+  }
+  const tags = (items) => (items || []).map((it) => `<span class="tag">${esc(it.name)} ×${it.qty}</span>`).join('');
+  el.innerHTML = events.map((ev) => {
+    if (ev.kind === 'create') {
+      return `
+        <div class="tl-event tl-create${ev.deleted ? ' tl-struck' : ''}">
+          <span class="tl-dot"></span>
+          <div class="tl-card">
+            <div class="tl-head">
+              <span class="tl-who">${esc(ev.record.person)} 提交</span>
+              ${ev.deleted ? '<span class="tl-badge tl-badge-del">已删除</span>' : ''}
+              <span class="tl-time">${esc(fmtTime(ev.t))}</span>
+            </div>
+            <div class="tl-items">${tags(ev.record.items)}</div>
+          </div>
+        </div>`;
+    }
+    const r = ev.record;
+    const ref = r
+      ? `${esc(r.person)}：${(r.items || []).map((it) => esc(it.name) + '×' + it.qty).join('、')}`
+      : '（原记录已不可考）';
+    return `
+      <div class="tl-event tl-delete">
+        <span class="tl-dot"></span>
+        <div class="tl-card">
+          <div class="tl-head">
+            <span class="tl-who">删除${ev.mode === 'clear' ? '（清空）' : ''}</span>
+            <span class="tl-time">${esc(fmtTime(ev.t))}</span>
+          </div>
+          <div class="tl-ref">↳ 原：${ref}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function deleteOneRecord(id, pw) {
   if (!id) { toast('该记录缺少 id，无法删除'); return; }
   try {
-    const res = await store.deleteRecord(id);
+    const res = await store.deleteRecord(id, pw);
     toast(res.deleted ? '已删除该条记录' : '记录不存在');
-    await openRecords();   // 重新拉取刷新列表
+    await openRecords();   // 重新拉取刷新列表（软删后此条不再出现在当前视图）
   } catch (e) {
     toast(`删除失败：${e.message}`);
   }
@@ -778,14 +881,13 @@ async function exportRecords() {
   }
 }
 
-async function clearRecords() {
-  if (!confirm('确定清空全部存货记录吗？\n\n此操作不可恢复，所有记录将被永久删除。')) return;
+async function clearRecords(pw) {
   const btn = $('#recordsClear');
   btn.disabled = true;
   try {
-    const res = await store.clearRecords();
-    toast(`已清空 ${res.cleared ?? 0} 条记录`);
-    await openRecords();   // 重新拉取并刷新列表（此时应为空）
+    const res = await store.clearRecords(pw);
+    toast(`已清空 ${res.cleared ?? 0} 条记录（仍可在「完整溯源」查看）`);
+    await openRecords();   // 重新拉取并刷新当前视图（清空后应为空）
   } catch (e) {
     toast(`清空失败：${e.message}`);
   } finally {
@@ -804,10 +906,10 @@ function toast(msg) {
 }
 
 /* ---------------- 密码防护（自动分类 / 清空记录） ---------------- */
-// 管理密码：保护「自动分类」入口与「清空记录」操作，防止普通用户误改/误删。
-// 改密码只需改这一行（纯前端门禁，面向非技术用户，足够拦住误操作）。
-const ADMIN_PASSWORD = '119';
+// 密码门禁：真正的密码只在 VM 后端，客户端代码不含明文（看源码也偷不到）。
+// 输入后发后端校验；受保护的写操作本身也在后端再校验一次（直接调接口也得有正确密码）。
 let pwPendingAction = null;
+let adminPw = '';   // 最近一次校验通过的密码，供本次受保护操作复用（仅内存，不落地）
 
 function requirePassword(title, action) {
   pwPendingAction = action;
@@ -830,15 +932,28 @@ function closePassword() {
   $('#pwOverlay').hidden = true;
   pwPendingAction = null;
 }
-function confirmPassword() {
-  if ($('#pwInput').value === ADMIN_PASSWORD) {
-    const action = pwPendingAction;
-    closePassword();
-    if (action) action();
-  } else {
+async function confirmPassword() {
+  const pw = $('#pwInput').value;
+  const btn = $('#pwConfirm');
+  btn.disabled = true;
+  try {
+    const { ok } = await store.verifyPassword(pw);
+    if (ok) {
+      adminPw = pw;
+      const action = pwPendingAction;
+      closePassword();
+      if (action) action(pw);
+    } else {
+      $('#pwError').textContent = '密码错误，请重试';
+      $('#pwError').hidden = false;
+      $('#pwInput').value = '';
+      $('#pwInput').focus();
+    }
+  } catch (e) {
+    $('#pwError').textContent = '验证失败，请检查网络后重试';
     $('#pwError').hidden = false;
-    $('#pwInput').value = '';
-    $('#pwInput').focus();
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -878,7 +993,9 @@ async function init() {
   $('#submitConfirm').addEventListener('click', confirmSubmit);
   $('#recordsBtn').addEventListener('click', openRecords);
   $('#recordsClose').addEventListener('click', closeRecords);
-  $('#recordsClear').addEventListener('click', () => requirePassword('清空记录需要密码', clearRecords));
+  $('#tabCurrent').addEventListener('click', () => { setRecordsView('current'); renderCurrentRecords(); });
+  $('#tabAudit').addEventListener('click', () => { setRecordsView('audit'); renderAuditView(); });
+  $('#recordsClear').addEventListener('click', () => requirePassword('清空记录需要密码', (pw) => clearRecords(pw)));
   $('#recordsExport').addEventListener('click', exportRecords);
   $('#addProductBtn').addEventListener('click', () => requirePassword('新增商品需要密码', openAddProduct));
   $('#addCancel').addEventListener('click', closeAddProduct);
