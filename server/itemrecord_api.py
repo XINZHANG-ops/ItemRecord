@@ -78,10 +78,16 @@ Python 代码要求：
       "id": "<纯英文小写，无空格，如 classic>",
       "name": "<中文分类名>",
       "keywords": ["关键词1", "关键词2"],
+      "catchAll": false,   // 可选，见下方说明
       "children": []
     }
   ]
 }
+
+特别说明 catchAll：
+- 如果某个分类的含义是"其他所有商品"（不属于其他任何分类），将 "catchAll" 设为 true，keywords 设为空数组 []
+- catchAll 分类会自动包含所有未被其他分类 keywords 匹配到的商品，不需要也不能用 keywords 来定义
+- 每个 result 中最多只能有一个 catchAll 分类，且应放在 categories 列表的最后
 
 回复格式：
 - 先简短说明你的分类逻辑（1-3句话）
@@ -453,19 +459,24 @@ else:
 
 def _compute_stats(products: list[dict], categories: dict) -> dict:
     cats = categories.get("categories", [])
+    normal_cats = [c for c in cats if not c.get("catchAll")]
+    catchall_cat = next((c for c in cats if c.get("catchAll")), None)
     per_cat: dict[str, int] = {}
     uncategorized_names: list[str] = []
 
     for p in products:
         name = p["name"].lower()
         matched = False
-        for cat in cats:
+        for cat in normal_cats:
             kws = [k.lower() for k in cat.get("keywords", [])]
             if any(k in name for k in kws):
                 per_cat[cat["name"]] = per_cat.get(cat["name"], 0) + 1
                 matched = True
         if not matched:
-            uncategorized_names.append(p["name"])
+            if catchall_cat:
+                per_cat[catchall_cat["name"]] = per_cat.get(catchall_cat["name"], 0) + 1
+            else:
+                uncategorized_names.append(p["name"])
 
     return {
         "total": len(products),

@@ -187,10 +187,16 @@ function catOf(cfg, id) {
 }
 
 function itemInCat(product, cat) {
+  // catchAll: true 表示"不属于其他任何分类"的商品都归入此类
+  if (cat.catchAll) {
+    return !state.categories.categories.some((c) => !c.catchAll && matchKeywords(product.name, c.keywords));
+  }
   return matchKeywords(product.name, cat.keywords);
 }
 
 function isUncategorized(product) {
+  // 有 catchAll 分类时，所有商品都有归属，不存在真正的"未分类"
+  if (state.categories.categories.some((c) => c.catchAll)) return false;
   return !state.categories.categories.some((c) => itemInCat(product, c));
 }
 
