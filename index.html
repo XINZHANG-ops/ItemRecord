@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>库存商品</title>
+  <link rel="stylesheet" href="styles.css?v=3" />
+</head>
+<body>
+  <!-- 顶部栏 -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1 class="brand">库存商品</h1>
+    </div>
+    <div class="topbar-center">
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input id="searchInput" type="search" placeholder="搜索商品名称或条码…" autocomplete="off" />
+        <button id="searchClear" class="search-clear" hidden aria-label="清除">×</button>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button id="addProductBtn" class="ghost-btn">＋ 新增商品</button>
+      <button id="aiCatBtn" class="ghost-btn">AI 分类</button>
+      <button id="recordsBtn" class="ghost-btn">存货记录</button>
+      <button id="cartBtn" class="cart-btn" aria-label="购物车">
+        🛒<span id="cartBadge" class="cart-badge" hidden>0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- 分类栏（数据驱动，可整份替换为 AI 输出的 JSON） -->
+  <nav class="category-bar">
+    <div id="catMain" class="chip-row"></div>
+    <div id="catSub" class="chip-row chip-row-sub" hidden></div>
+  </nav>
+
+  <!-- 结果统计 -->
+  <div class="result-bar">
+    <span id="resultCount">共 0 件商品</span>
+  </div>
+
+  <!-- 商品网格 -->
+  <main id="grid" class="grid" aria-live="polite"></main>
+  <div id="emptyState" class="empty-state" hidden>没有找到匹配的商品</div>
+
+  <!-- 购物车遮罩 + 面板 -->
+  <div id="overlay" class="overlay" hidden></div>
+  <aside id="cartPanel" class="cart-panel" aria-hidden="true">
+    <div class="cart-header">
+      <button id="cartClose" class="ghost-btn">关闭</button>
+      <span class="cart-title">购物车：<span id="cartTitleCount">0</span></span>
+      <button id="submitBtn" class="primary-btn">提交</button>
+    </div>
+    <div id="cartList" class="cart-list"></div>
+    <div id="cartEmpty" class="cart-empty">购物车是空的，点商品卡片上的「＋」加入。</div>
+  </aside>
+
+  <!-- 提交弹窗 -->
+  <div id="submitOverlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2 class="modal-title">确认提交</h2>
+      <p class="modal-sub">将记录下：是谁、什么时间、存了哪些商品。</p>
+      <label class="field">
+        <span>存货人姓名</span>
+        <input id="personInput" type="text" placeholder="请输入你的名字" maxlength="40" />
+      </label>
+      <div id="submitSummary" class="submit-summary"></div>
+      <div class="modal-actions">
+        <button id="submitCancel" class="ghost-btn">取消</button>
+        <button id="submitConfirm" class="primary-btn">确认保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新增商品弹窗 -->
+  <div id="addOverlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2 class="modal-title">新增商品</h2>
+      <p class="modal-sub">追加到目录，不影响已有商品。会自动按现有规则归类，未命中的进「未分类」。</p>
+      <label class="field">
+        <span>商品名称（必填）</span>
+        <input id="addName" type="text" placeholder="例如：趣味草莓 (均码 18cm)" maxlength="120" />
+      </label>
+      <label class="field" style="margin-top:12px">
+        <span>商品条码（选填，留空自动生成）</span>
+        <input id="addBarcode" type="text" placeholder="例如：670983168888" maxlength="60" />
+      </label>
+      <label class="field" style="margin-top:12px">
+        <span>添加人（选填）</span>
+        <input id="addPerson" type="text" placeholder="你的名字" maxlength="40" />
+      </label>
+      <div class="modal-actions" style="margin-top:18px">
+        <button id="addCancel" class="ghost-btn">取消</button>
+        <button id="addConfirm" class="primary-btn">保存商品</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI 分类弹窗 -->
+  <div id="aiCatOverlay" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2 class="modal-title">AI 更新分类规则</h2>
+      <p class="modal-sub">用自然语言描述你想怎么调整分类，AI 会读取全部 312 件商品，生成并运行分类脚本，确保每件商品都被正确归类。</p>
+      <label class="field">
+        <span>你的指令</span>
+        <textarea id="aiCatInstruction" rows="4" placeholder="例如：把所有含"挂件"的商品归入配饰系列；把巴塞罗熊和邦尼兔单独拆成一个顶级分类" style="resize:vertical;padding:10px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;width:100%;"></textarea>
+      </label>
+      <div id="aiCatResult" class="ai-cat-result" hidden></div>
+      <div class="modal-actions" style="margin-top:18px">
+        <button id="aiCatCancel" class="ghost-btn">关闭</button>
+        <button id="aiCatConfirm" class="primary-btn">开始更新</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 记录弹窗 -->
+  <div id="recordsOverlay" class="modal-overlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-head-row">
+        <h2 class="modal-title">存货记录</h2>
+        <button id="recordsClose" class="ghost-btn">关闭</button>
+      </div>
+      <div id="recordsList" class="records-list"></div>
+      <div id="recordsEmpty" class="records-empty">还没有任何记录。</div>
+    </div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="vendor/pinyin-pro.js"></script>
+  <script src="app.js?v=3"></script>
+</body>
+</html>
