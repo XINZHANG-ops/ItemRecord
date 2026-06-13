@@ -464,12 +464,14 @@ function closeQtyEditor() {
 }
 
 function renderCart() {
-  // 数量可正可负，合计意义不大；徽标显示车里"有几样商品"
+  // 两个数：种类数（车里有几样商品）+ 总数（各商品数量之和，可正可负=净流通）
   const count = state.cart.size;
+  const total = [...state.cart.values()].reduce((s, it) => s + it.qty, 0);
   const badge = $('#cartBadge');
-  badge.textContent = count;
+  badge.textContent = count === 0 ? '' : `${count}·${total}`;  // 红圈：种类·总数
   badge.hidden = count === 0;
   $('#cartTitleCount').textContent = count;
+  $('#cartTitleTotal').textContent = total;
   $('#submitBtn').disabled = state.cart.size === 0;
 
   const listEl = $('#cartList');
@@ -772,6 +774,36 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 1800);
 }
 
+/* ---------------- 密码防护（自动分类 / 清空记录） ---------------- */
+// 管理密码：保护「自动分类」入口与「清空记录」操作，防止普通用户误改/误删。
+// 改密码只需改这一行（纯前端门禁，面向非技术用户，足够拦住误操作）。
+const ADMIN_PASSWORD = '123';
+let pwPendingAction = null;
+
+function requirePassword(title, action) {
+  pwPendingAction = action;
+  $('#pwTitle').textContent = title || '需要密码';
+  $('#pwInput').value = '';
+  $('#pwError').hidden = true;
+  $('#pwOverlay').hidden = false;
+  $('#pwInput').focus();
+}
+function closePassword() {
+  $('#pwOverlay').hidden = true;
+  pwPendingAction = null;
+}
+function confirmPassword() {
+  if ($('#pwInput').value === ADMIN_PASSWORD) {
+    const action = pwPendingAction;
+    closePassword();
+    if (action) action();
+  } else {
+    $('#pwError').hidden = false;
+    $('#pwInput').value = '';
+    $('#pwInput').focus();
+  }
+}
+
 /* ---------------- 搜索（防抖） ---------------- */
 function bindSearch() {
   const input = $('#searchInput');
@@ -808,12 +840,12 @@ async function init() {
   $('#submitConfirm').addEventListener('click', confirmSubmit);
   $('#recordsBtn').addEventListener('click', openRecords);
   $('#recordsClose').addEventListener('click', closeRecords);
-  $('#recordsClear').addEventListener('click', clearRecords);
+  $('#recordsClear').addEventListener('click', () => requirePassword('清空记录需要密码', clearRecords));
   $('#recordsExport').addEventListener('click', exportRecords);
   $('#addProductBtn').addEventListener('click', openAddProduct);
   $('#addCancel').addEventListener('click', closeAddProduct);
   $('#addConfirm').addEventListener('click', confirmAddProduct);
-  $('#aiCatBtn').addEventListener('click', openAiCategories);
+  $('#aiCatBtn').addEventListener('click', () => requirePassword('自动分类需要密码', openAiCategories));
   $('#aiCatCancel').addEventListener('click', closeAiCategories);
   $('#aiCatConfirm').addEventListener('click', confirmAiCategories);
   $('#aiCatClearHistory').addEventListener('click', clearAiHistory);
@@ -836,8 +868,14 @@ async function init() {
   $('#qtyEditInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') commitQtyEditor(); });
   $('#qtyOverlay').addEventListener('click', (e) => { if (e.target === $('#qtyOverlay')) commitQtyEditor(); });
 
+  // 密码弹窗
+  $('#pwConfirm').addEventListener('click', confirmPassword);
+  $('#pwCancel').addEventListener('click', closePassword);
+  $('#pwInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmPassword(); });
+  $('#pwOverlay').addEventListener('click', (e) => { if (e.target === $('#pwOverlay')) closePassword(); });
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { commitQtyEditor(); closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
+    if (e.key === 'Escape') { commitQtyEditor(); closePassword(); closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
   });
   $('#personInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmSubmit(); });
 
