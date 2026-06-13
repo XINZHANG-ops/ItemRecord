@@ -314,7 +314,8 @@ function renderGrid() {
   empty.hidden = true;
 
   grid.innerHTML = list.map((p) => {
-    const qty = state.cart.get(p.barcode)?.qty || 0;
+    const inCart = state.cart.has(p.barcode);
+    const qty = state.cart.get(p.barcode)?.qty ?? 0;
     const first = (p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0];
     const isNew = p.source === 'custom';
     return `
@@ -323,9 +324,9 @@ function renderGrid() {
         <div class="card-body">
           <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
           <div class="card-barcode">${esc(p.barcode)}</div>
-          <div class="card-stepper${qty > 0 ? ' active' : ''}">
-            <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="-1" aria-label="减少"${qty === 0 ? ' disabled' : ''}>−</button>
-            <input class="card-qty" type="text" inputmode="numeric" pattern="[0-9]*" value="${qty}" data-barcode="${esc(p.barcode)}" aria-label="数量" />
+          <div class="card-stepper${inCart ? ' active' : ''}">
+            <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="-1" aria-label="减少">−</button>
+            <input class="card-qty" type="text" inputmode="numeric" pattern="-?[0-9]*" value="${qty}" data-barcode="${esc(p.barcode)}" aria-label="数量" />
             <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="1" aria-label="增加">＋</button>
           </div>
         </div>
@@ -361,38 +362,35 @@ function restoreCart() {
   } catch { /* 损坏则忽略，保持空车 */ }
 }
 
-// 卡片上的 −/＋：首次加入或增减数量，数量为 0 时移出购物车
+// 卡片上的 −/＋：记录流通流水，数量可正可负可为 0（负数=出库）。
+// 不再在 0 处自动移除——要从车里删除请用购物车里的 🗑。
 function stepCard(barcode, delta) {
   const item = state.cart.get(barcode);
   if (!item) {
-    if (delta <= 0) return;
     const p = state.products.find((x) => x.barcode === barcode);
     if (!p) return;
-    state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: 1, addedAt: new Date().toISOString() });
+    state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: delta, addedAt: new Date().toISOString() });
   } else {
-    item.qty += delta;
-    if (item.qty <= 0) state.cart.delete(barcode);
+    item.qty = Math.max(-9999, Math.min(9999, item.qty + delta));
   }
   persistCart();
   renderCart();
   renderGrid();
 }
 
-// 手输数量：卡片与购物车中间的数字都可点击直接输入
+// 手输数量：可正可负可为 0（负数=出库）。空/非法则不改动，恢复原显示。
 function setQty(barcode, value) {
-  let q = parseInt(value, 10);
-  if (isNaN(q) || q < 0) q = 0;
-  q = Math.min(q, 9999);
+  let q = parseInt(String(value).trim(), 10);
+  if (isNaN(q)) { renderCart(); renderGrid(); return; }
+  q = Math.max(-9999, Math.min(9999, q));
   const item = state.cart.get(barcode);
   if (!item) {
-    if (q > 0) {
+    if (q !== 0) {   // 不为车里凭空创建一个 0 值空项
       const p = state.products.find((x) => x.barcode === barcode);
       if (p) state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: q, addedAt: new Date().toISOString() });
     }
-  } else if (q <= 0) {
-    state.cart.delete(barcode);
   } else {
-    item.qty = q;
+    item.qty = q;    // 任意值（含 0、负数），删除请用购物车 🗑
   }
   persistCart();
   renderCart();
@@ -402,8 +400,7 @@ function setQty(barcode, value) {
 function changeQty(barcode, delta) {
   const item = state.cart.get(barcode);
   if (!item) return;
-  item.qty += delta;
-  if (item.qty <= 0) state.cart.delete(barcode);
+  item.qty = Math.max(-9999, Math.min(9999, item.qty + delta));
   persistCart();
   renderCart();
   renderGrid();
@@ -416,14 +413,9 @@ function removeFromCart(barcode) {
   renderGrid();
 }
 
-function cartCount() {
-  let n = 0;
-  for (const it of state.cart.values()) n += it.qty;
-  return n;
-}
-
 function renderCart() {
-  const count = cartCount();
+  // 数量可正可负，合计意义不大；徽标显示车里"有几样商品"
+  const count = state.cart.size;
   const badge = $('#cartBadge');
   badge.textContent = count;
   badge.hidden = count === 0;
@@ -446,7 +438,7 @@ function renderCart() {
       </div>
       <div class="qty">
         <button data-act="dec" data-bc="${esc(it.barcode)}">－</button>
-        <input type="text" inputmode="numeric" pattern="[0-9]*" value="${it.qty}" data-bc="${esc(it.barcode)}" aria-label="数量" />
+        <input type="text" inputmode="numeric" pattern="-?[0-9]*" value="${it.qty}" data-bc="${esc(it.barcode)}" aria-label="数量" />
         <button data-act="inc" data-bc="${esc(it.barcode)}">＋</button>
       </div>
       <button class="ci-del" data-act="del" data-bc="${esc(it.barcode)}" aria-label="删除">🗑</button>
@@ -749,6 +741,12 @@ function bindSearch() {
 
 /* ---------------- 初始化 ---------------- */
 async function init() {
+  // 彻底禁用整页缩放：iOS 会忽略 viewport 的 user-scalable=no，需 JS 拦截捏合手势
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((ev) =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+  // 兜底拦掉双指 touchmove（部分内核不触发 gesture 事件）
+  document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+
   bindSearch();
   $('#cartBtn').addEventListener('click', openCart);
   $('#cartClose').addEventListener('click', closeCart);

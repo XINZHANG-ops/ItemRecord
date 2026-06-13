@@ -22,6 +22,8 @@ html, body {
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;     /* 关掉整页双击缩放（捏合缩放由 meta + JS 手势拦截） */
+  -webkit-text-size-adjust: 100%; /* 阻止横竖屏切换时字体被自动放大 */
 }
 
 /* touch-action: manipulation 关掉移动端双击缩放，连点 +/- 时不再忽大忽小 */
