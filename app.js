@@ -325,7 +325,7 @@ function renderGrid() {
           <div class="card-barcode">${esc(p.barcode)}</div>
           <div class="card-stepper${qty > 0 ? ' active' : ''}">
             <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="-1" aria-label="减少"${qty === 0 ? ' disabled' : ''}>−</button>
-            <span class="card-qty">${qty}</span>
+            <input class="card-qty" type="text" inputmode="numeric" pattern="[0-9]*" value="${qty}" data-barcode="${esc(p.barcode)}" aria-label="数量" />
             <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="1" aria-label="增加">＋</button>
           </div>
         </div>
@@ -335,9 +335,32 @@ function renderGrid() {
   grid.querySelectorAll('.card-step').forEach((btn) => {
     btn.addEventListener('click', () => stepCard(btn.dataset.barcode, Number(btn.dataset.delta)));
   });
+  bindQtyInputs(grid, 'barcode');
+}
+
+// 给数量输入框绑定：聚焦全选、回车收起键盘、change 时提交（避免每键重渲染丢焦点）
+function bindQtyInputs(scope, dataKey) {
+  scope.querySelectorAll('input[inputmode="numeric"]').forEach((inp) => {
+    inp.addEventListener('focus', () => inp.select());
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    inp.addEventListener('change', () => setQty(inp.dataset[dataKey], inp.value));
+  });
 }
 
 /* ---------------- 购物车 ---------------- */
+// 购物车持久化：选购过程可能长达半小时，手机后台回收标签页会重载页面，
+// 内存里的 cart 会丢。每次变更都写本地，init 时恢复，确保刷新/回收后选购不丢。
+const CART_KEY = 'itemrecord.cart';
+function persistCart() {
+  localStorage.setItem(CART_KEY, JSON.stringify([...state.cart.values()]));
+}
+function restoreCart() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+    if (Array.isArray(arr)) state.cart = new Map(arr.filter((it) => it && it.barcode).map((it) => [it.barcode, it]));
+  } catch { /* 损坏则忽略，保持空车 */ }
+}
+
 // 卡片上的 −/＋：首次加入或增减数量，数量为 0 时移出购物车
 function stepCard(barcode, delta) {
   const item = state.cart.get(barcode);
@@ -350,6 +373,28 @@ function stepCard(barcode, delta) {
     item.qty += delta;
     if (item.qty <= 0) state.cart.delete(barcode);
   }
+  persistCart();
+  renderCart();
+  renderGrid();
+}
+
+// 手输数量：卡片与购物车中间的数字都可点击直接输入
+function setQty(barcode, value) {
+  let q = parseInt(value, 10);
+  if (isNaN(q) || q < 0) q = 0;
+  q = Math.min(q, 9999);
+  const item = state.cart.get(barcode);
+  if (!item) {
+    if (q > 0) {
+      const p = state.products.find((x) => x.barcode === barcode);
+      if (p) state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: q, addedAt: new Date().toISOString() });
+    }
+  } else if (q <= 0) {
+    state.cart.delete(barcode);
+  } else {
+    item.qty = q;
+  }
+  persistCart();
   renderCart();
   renderGrid();
 }
@@ -359,12 +404,14 @@ function changeQty(barcode, delta) {
   if (!item) return;
   item.qty += delta;
   if (item.qty <= 0) state.cart.delete(barcode);
+  persistCart();
   renderCart();
   renderGrid();
 }
 
 function removeFromCart(barcode) {
   state.cart.delete(barcode);
+  persistCart();
   renderCart();
   renderGrid();
 }
@@ -399,7 +446,7 @@ function renderCart() {
       </div>
       <div class="qty">
         <button data-act="dec" data-bc="${esc(it.barcode)}">－</button>
-        <span>${it.qty}</span>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" value="${it.qty}" data-bc="${esc(it.barcode)}" aria-label="数量" />
         <button data-act="inc" data-bc="${esc(it.barcode)}">＋</button>
       </div>
       <button class="ci-del" data-act="del" data-bc="${esc(it.barcode)}" aria-label="删除">🗑</button>
@@ -413,6 +460,7 @@ function renderCart() {
       else removeFromCart(bc);
     });
   });
+  bindQtyInputs(listEl, 'bc');
 }
 
 function openCart() {
@@ -458,6 +506,7 @@ async function confirmSubmit() {
     await store.saveRecord(record);
     localStorage.setItem('itemrecord.lastPerson', person);
     state.cart.clear();
+    persistCart();
     renderCart();
     renderGrid();
     closeSubmit();
@@ -617,6 +666,43 @@ async function openRecords() {
 }
 function closeRecords() { $('#recordsOverlay').hidden = true; }
 
+// 导出存货记录为 CSV（含 UTF-8 BOM，Excel / WPS 直接打开；每个商品一行）
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+async function exportRecords() {
+  const btn = $('#recordsExport');
+  btn.disabled = true;
+  try {
+    const records = await store.fetchRecords();
+    if (!records.length) { toast('没有记录可导出'); return; }
+    records.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+    const rows = [['时间', '提交人', '条码', '名称', '数量']];
+    for (const r of records) {
+      for (const it of r.items) {
+        rows.push([fmtTime(r.submittedAt), r.person, it.barcode, it.name, it.qty]);
+      }
+    }
+    const csv = '﻿' + rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `存货记录_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast('导出失败，请重试');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function clearRecords() {
   if (!confirm('确定清空全部存货记录吗？\n\n此操作不可恢复，所有记录将被永久删除。')) return;
   const btn = $('#recordsClear');
@@ -673,6 +759,7 @@ async function init() {
   $('#recordsBtn').addEventListener('click', openRecords);
   $('#recordsClose').addEventListener('click', closeRecords);
   $('#recordsClear').addEventListener('click', clearRecords);
+  $('#recordsExport').addEventListener('click', exportRecords);
   $('#addProductBtn').addEventListener('click', openAddProduct);
   $('#addCancel').addEventListener('click', closeAddProduct);
   $('#addConfirm').addEventListener('click', confirmAddProduct);
@@ -693,6 +780,7 @@ async function init() {
   });
   $('#personInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmSubmit(); });
 
+  restoreCart();               // 恢复上次未提交的选购（防止刷新/手机回收标签页丢失）
   store.flushPendingRecords(); // 静默补提交上次离线暂存的记录，不阻塞 UI
   try {
     const [products, categories] = await Promise.all([loadProducts(), store.fetchCategories()]);

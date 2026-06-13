@@ -33,6 +33,7 @@ CATEGORIES_FILE = BASE_DIR / "data" / "categories.json"
 PRODUCTS_FILE   = BASE_DIR / "data" / "products.json"
 HISTORY_FILE    = BASE_DIR / "ai_chat_history.json"   # 持久化对话历史
 SCRIPT_FILE     = BASE_DIR / "ai_categorize.py"       # AI 生成的分类脚本（可查看调试）
+CATEGORY_HISTORY_DIR = BASE_DIR / "category_version_history"  # 每版分类快照，纯人工应急查看/回滚用，app 不读
 
 OLLAMA_URL      = "http://localhost:11434/api/chat"
 MODEL           = "kimi-k2.7-code:cloud"   # 主分类模型（写 Python 代码）
@@ -288,12 +289,28 @@ async def update_categories(req: CategoryUpdateRequest):
         tmp.write_text(json.dumps(new_cats, ensure_ascii=False, indent=2))
         os.replace(tmp, CATEGORIES_FILE)
 
+        # 写一份带版本号的快照，纯人工应急/回滚用，app 不读这个目录
+        _snapshot_category_version(new_cats)
+
         return CategoryUpdateResponse(
             ok=True,
             message="分类规则已更新",
             stats=stats,
             history_turns=turns,
         )
+
+
+def _snapshot_category_version(cats: dict) -> None:
+    """把刚写入的分类存一份带版本号+时间戳的快照到 CATEGORY_HISTORY_DIR。
+    纯人工应急/回滚用，app 不读这个目录；快照失败不影响主流程。"""
+    try:
+        CATEGORY_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        version = cats.get("version", 0)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        snapshot = CATEGORY_HISTORY_DIR / f"categories.v{version}_{ts}.json"
+        snapshot.write_text(json.dumps(cats, ensure_ascii=False, indent=2))
+    except Exception:
+        pass
 
 
 # ── AI 核心：Ollama HTTP + 手动 messages 历史 ─────────────────────────────────

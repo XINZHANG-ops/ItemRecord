@@ -24,7 +24,8 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-button { font-family: inherit; cursor: pointer; }
+/* touch-action: manipulation 关掉移动端双击缩放，连点 +/- 时不再忽大忽小 */
+button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
 
 /* ---------- 顶部栏 ---------- */
 .topbar {
@@ -218,7 +219,7 @@ button { font-family: inherit; cursor: pointer; }
   margin: 12px auto 60px;
   padding: 0 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(3, 1fr);   /* 所有屏幕固定每行 3 个，卡片宽度自适应 */
   gap: 14px;
 }
 
@@ -278,10 +279,9 @@ button { font-family: inherit; cursor: pointer; }
   font-weight: 600;
   line-height: 1.35;
   min-height: 38px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* 名称完整显示：不再截断，长名换行、卡片自适应增高；超长无空格串也强制换行不溢出 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .card-barcode {
   font-size: 11px;
@@ -319,11 +319,18 @@ button { font-family: inherit; cursor: pointer; }
 .card-step:disabled { color: var(--line); cursor: default; background: #fafafa; }
 .card-qty {
   flex: 1;
+  min-width: 0;
   text-align: center;
-  font-size: 15px;
+  font-size: 16px;            /* ≥16px 防 iOS 聚焦时自动放大 */
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
+  border: none;
+  background: transparent;
+  outline: none;
+  padding: 0;
+  touch-action: manipulation;
+  -moz-appearance: textfield;
 }
 
 .empty-state {
@@ -420,11 +427,18 @@ button { font-family: inherit; cursor: pointer; }
   line-height: 1;
 }
 .qty button:hover { background: var(--brand); color: #fff; }
-.qty span {
-  min-width: 30px;
+.qty input {
+  width: 44px;
+  min-width: 44px;
   text-align: center;
-  font-size: 13px;
+  font-size: 16px;            /* ≥16px 防 iOS 聚焦时自动放大 */
   font-variant-numeric: tabular-nums;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  touch-action: manipulation;
+  -moz-appearance: textfield;
 }
 
 /* ---------- 弹窗 ---------- */
@@ -542,5 +556,13 @@ button { font-family: inherit; cursor: pointer; }
   .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
   .topbar-center { order: 3; flex-basis: 100%; }
   .brand { font-size: 16px; }
-  .grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  /* 手机竖屏：每行 3 个，整体缩小但名称仍完整显示 */
+  .grid { grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 10px; }
+  .card-cover { height: 68px; font-size: 24px; }
+  .card-body { padding: 8px 7px 9px; gap: 4px; }
+  .card-name { font-size: 12px; line-height: 1.3; min-height: 31px; }
+  .card-barcode { font-size: 10px; }
+  .card-stepper { height: 30px; }
+  .card-step { width: 28px; font-size: 17px; }
+  .card-qty { font-size: 16px; }   /* 仍保持 16px 防聚焦缩放 */
 }
