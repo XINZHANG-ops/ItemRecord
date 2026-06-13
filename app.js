@@ -140,11 +140,14 @@ const state = {
   activeSub: null,      // 子分类 id 或 null
   search: '',
   cart: new Map(),      // barcode -> { barcode, name, qty, addedAt }
+  editBarcode: null,    // 当前数量编辑弹窗对应的商品
+  editQty: 0,           // 弹窗中的待提交数量（关闭时才落到购物车）
 };
 
 /* ---------------- 工具 ---------------- */
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const clampQty = (n) => Math.max(-9999, Math.min(9999, n));
 
 function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -326,7 +329,7 @@ function renderGrid() {
           <div class="card-barcode">${esc(p.barcode)}</div>
           <div class="card-stepper${inCart ? ' active' : ''}">
             <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="-1" aria-label="减少">−</button>
-            <input class="card-qty" type="text" inputmode="numeric" pattern="-?[0-9]*" value="${qty}" data-barcode="${esc(p.barcode)}" aria-label="数量" />
+            <span class="card-qty" data-barcode="${esc(p.barcode)}" role="button" tabindex="0" title="点击输入数量（可正可负）">${qty}</span>
             <button class="card-step" data-barcode="${esc(p.barcode)}" data-delta="1" aria-label="增加">＋</button>
           </div>
         </div>
@@ -336,7 +339,10 @@ function renderGrid() {
   grid.querySelectorAll('.card-step').forEach((btn) => {
     btn.addEventListener('click', () => stepCard(btn.dataset.barcode, Number(btn.dataset.delta)));
   });
-  bindQtyInputs(grid, 'barcode');
+  // 点数字弹出小窗编辑（卡片窄放不下 ±，弹窗里有加减和正负切换）
+  grid.querySelectorAll('.card-qty').forEach((el) => {
+    el.addEventListener('click', () => openQtyEditor(el.dataset.barcode));
+  });
 }
 
 // 给数量输入框绑定：聚焦全选、回车收起键盘、change 时提交（避免每键重渲染丢焦点）
@@ -367,30 +373,33 @@ function restoreCart() {
 function stepCard(barcode, delta) {
   const item = state.cart.get(barcode);
   if (!item) {
+    if (delta === 0) return;
     const p = state.products.find((x) => x.barcode === barcode);
     if (!p) return;
     state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: delta, addedAt: new Date().toISOString() });
   } else {
-    item.qty = Math.max(-9999, Math.min(9999, item.qty + delta));
+    const q = clampQty(item.qty + delta);
+    if (q === 0) state.cart.delete(barcode);   // 归 0 = 不记录，移出购物车
+    else item.qty = q;
   }
   persistCart();
   renderCart();
   renderGrid();
 }
 
-// 手输数量：可正可负可为 0（负数=出库）。空/非法则不改动，恢复原显示。
+// 设置数量：可正可负。0 = 不记录，移出购物车。空/非法不改动。
 function setQty(barcode, value) {
   let q = parseInt(String(value).trim(), 10);
   if (isNaN(q)) { renderCart(); renderGrid(); return; }
-  q = Math.max(-9999, Math.min(9999, q));
+  q = clampQty(q);
   const item = state.cart.get(barcode);
-  if (!item) {
-    if (q !== 0) {   // 不为车里凭空创建一个 0 值空项
-      const p = state.products.find((x) => x.barcode === barcode);
-      if (p) state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: q, addedAt: new Date().toISOString() });
-    }
+  if (q === 0) {
+    if (item) state.cart.delete(barcode);
+  } else if (!item) {
+    const p = state.products.find((x) => x.barcode === barcode);
+    if (p) state.cart.set(barcode, { barcode: p.barcode, name: p.name, qty: q, addedAt: new Date().toISOString() });
   } else {
-    item.qty = q;    // 任意值（含 0、负数），删除请用购物车 🗑
+    item.qty = q;
   }
   persistCart();
   renderCart();
@@ -400,7 +409,9 @@ function setQty(barcode, value) {
 function changeQty(barcode, delta) {
   const item = state.cart.get(barcode);
   if (!item) return;
-  item.qty = Math.max(-9999, Math.min(9999, item.qty + delta));
+  const q = clampQty(item.qty + delta);
+  if (q === 0) state.cart.delete(barcode);   // 归 0 = 移出购物车
+  else item.qty = q;
   persistCart();
   renderCart();
   renderGrid();
@@ -421,6 +432,35 @@ function toggleSign(barcode) {
   persistCart();
   renderCart();
   renderGrid();
+}
+
+/* ---------------- 数量编辑弹窗（点卡片数字弹出，含加减与正负） ---------------- */
+function openQtyEditor(barcode) {
+  const p = state.products.find((x) => x.barcode === barcode);
+  if (!p && !state.cart.has(barcode)) return;
+  state.editBarcode = barcode;
+  state.editQty = state.cart.get(barcode)?.qty ?? 0;
+  $('#qtyEditName').textContent = state.cart.get(barcode)?.name || p?.name || '数量';
+  syncQtyEditor();
+  $('#qtyOverlay').hidden = false;
+  const inp = $('#qtyEditInput');
+  inp.focus();
+  inp.select();
+}
+function syncQtyEditor() { $('#qtyEditInput').value = state.editQty; }
+function stepQtyEditor(delta) { state.editQty = clampQty(state.editQty + delta); syncQtyEditor(); }
+function signQtyEditor() { state.editQty = -state.editQty; syncQtyEditor(); }
+function inputQtyEditor(value) {
+  const v = parseInt(String(value).trim(), 10);
+  state.editQty = isNaN(v) ? 0 : clampQty(v);
+}
+function commitQtyEditor() {
+  if (state.editBarcode != null) setQty(state.editBarcode, state.editQty); // 0 自动移出
+  closeQtyEditor();
+}
+function closeQtyEditor() {
+  $('#qtyOverlay').hidden = true;
+  state.editBarcode = null;
 }
 
 function renderCart() {
@@ -785,8 +825,19 @@ async function init() {
     }
   });
   $('#addName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#addBarcode').focus(); });
+
+  // 数量编辑弹窗
+  $('#qtyEditDec').addEventListener('click', () => stepQtyEditor(-1));
+  $('#qtyEditInc').addEventListener('click', () => stepQtyEditor(1));
+  $('#qtyEditSign').addEventListener('click', signQtyEditor);
+  $('#qtyEditDone').addEventListener('click', commitQtyEditor);
+  $('#qtyEditInput').addEventListener('input', () => inputQtyEditor($('#qtyEditInput').value));
+  $('#qtyEditInput').addEventListener('focus', () => $('#qtyEditInput').select());
+  $('#qtyEditInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') commitQtyEditor(); });
+  $('#qtyOverlay').addEventListener('click', (e) => { if (e.target === $('#qtyOverlay')) commitQtyEditor(); });
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
+    if (e.key === 'Escape') { commitQtyEditor(); closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
   });
   $('#personInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmSubmit(); });
 

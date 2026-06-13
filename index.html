@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -131,10 +131,27 @@
     </div>
   </div>
 
+  <!-- 数量编辑弹窗（点商品卡片上的数字弹出） -->
+  <div id="qtyOverlay" class="modal-overlay" hidden>
+    <div class="modal qty-modal" role="dialog" aria-modal="true">
+      <h2 class="modal-title" id="qtyEditName">数量</h2>
+      <p class="modal-sub">正数 = 入库，负数 = 出库（点「± 切换正负」）</p>
+      <div class="qty-editor">
+        <button id="qtyEditDec" class="qty-big-btn" aria-label="减少">−</button>
+        <input id="qtyEditInput" class="qty-big-input" type="text" inputmode="numeric" pattern="-?[0-9]*" aria-label="数量" />
+        <button id="qtyEditInc" class="qty-big-btn" aria-label="增加">＋</button>
+      </div>
+      <button id="qtyEditSign" class="ghost-btn qty-sign-btn">± 切换正负（出库填负数）</button>
+      <div class="modal-actions" style="margin-top:18px">
+        <button id="qtyEditDone" class="primary-btn">完成</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 轻提示 -->
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>
