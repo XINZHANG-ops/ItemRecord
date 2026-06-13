@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=11" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -153,7 +153,10 @@
     <div class="modal qty-modal" role="dialog" aria-modal="true">
       <h2 class="modal-title" id="pwTitle">需要密码</h2>
       <p class="modal-sub">此操作受保护，请输入管理密码后继续。</p>
-      <input id="pwInput" class="pw-input" type="password" autocomplete="off" aria-label="管理密码" />
+      <div class="pw-input-wrap">
+        <input id="pwInput" class="pw-input" type="password" autocomplete="off" aria-label="管理密码" />
+        <button id="pwToggle" class="pw-toggle" type="button" aria-label="显示或隐藏密码">👁</button>
+      </div>
       <div id="pwError" class="ai-result-err" hidden style="margin-top:8px">密码错误，请重试</div>
       <div class="modal-actions" style="margin-top:18px">
         <button id="pwCancel" class="ghost-btn">取消</button>
@@ -166,6 +169,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

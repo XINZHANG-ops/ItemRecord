@@ -96,6 +96,16 @@ const store = {
     return res.json();
   },
 
+  // 删除单条记录（按 id，不可恢复）
+  async deleteRecord(id) {
+    const res = await fetch(`/api/records/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
   // 刷新时把离线暂存的记录补提交
   async flushPendingRecords() {
     const key = 'itemrecord.pendingRecords';
@@ -701,16 +711,35 @@ async function openRecords() {
       <div class="record">
         <div class="record-head">
           <span class="record-person">${esc(r.person)}</span>
-          <span class="record-time">${esc(fmtTime(r.submittedAt))}</span>
+          <span class="record-head-right">
+            <span class="record-time">${esc(fmtTime(r.submittedAt))}</span>
+            <button class="record-del" data-id="${esc(r.id || '')}" aria-label="删除此条记录">🗑</button>
+          </span>
         </div>
         <div class="record-items">
           ${r.items.map((it) => `<span class="tag">${esc(it.name)} ×${it.qty}</span>`).join('')}
         </div>
       </div>`).join('');
+    // 单条删除：先验密码，再删（密码即确认，不再二次 confirm）
+    listEl.querySelectorAll('.record-del').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        requirePassword('删除此条记录需要密码', () => deleteOneRecord(btn.dataset.id)));
+    });
   }
   $('#recordsOverlay').hidden = false;
 }
 function closeRecords() { $('#recordsOverlay').hidden = true; }
+
+async function deleteOneRecord(id) {
+  if (!id) { toast('该记录缺少 id，无法删除'); return; }
+  try {
+    const res = await store.deleteRecord(id);
+    toast(res.deleted ? '已删除该条记录' : '记录不存在');
+    await openRecords();   // 重新拉取刷新列表
+  } catch (e) {
+    toast(`删除失败：${e.message}`);
+  }
+}
 
 // 导出存货记录为 CSV（含 UTF-8 BOM，Excel / WPS 直接打开；每个商品一行）
 function csvCell(v) {
@@ -784,8 +813,17 @@ function requirePassword(title, action) {
   pwPendingAction = action;
   $('#pwTitle').textContent = title || '需要密码';
   $('#pwInput').value = '';
+  setPwVisible(false);        // 每次打开默认隐藏
   $('#pwError').hidden = true;
   $('#pwOverlay').hidden = false;
+  $('#pwInput').focus();
+}
+function setPwVisible(show) {
+  $('#pwInput').type = show ? 'text' : 'password';
+  $('#pwToggle').textContent = show ? '🙈' : '👁';
+}
+function togglePwVisible() {
+  setPwVisible($('#pwInput').type === 'password');
   $('#pwInput').focus();
 }
 function closePassword() {
@@ -842,7 +880,7 @@ async function init() {
   $('#recordsClose').addEventListener('click', closeRecords);
   $('#recordsClear').addEventListener('click', () => requirePassword('清空记录需要密码', clearRecords));
   $('#recordsExport').addEventListener('click', exportRecords);
-  $('#addProductBtn').addEventListener('click', openAddProduct);
+  $('#addProductBtn').addEventListener('click', () => requirePassword('新增商品需要密码', openAddProduct));
   $('#addCancel').addEventListener('click', closeAddProduct);
   $('#addConfirm').addEventListener('click', confirmAddProduct);
   $('#aiCatBtn').addEventListener('click', () => requirePassword('自动分类需要密码', openAiCategories));
@@ -871,6 +909,7 @@ async function init() {
   // 密码弹窗
   $('#pwConfirm').addEventListener('click', confirmPassword);
   $('#pwCancel').addEventListener('click', closePassword);
+  $('#pwToggle').addEventListener('click', togglePwVisible);
   $('#pwInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmPassword(); });
   $('#pwOverlay').addEventListener('click', (e) => { if (e.target === $('#pwOverlay')) closePassword(); });
 

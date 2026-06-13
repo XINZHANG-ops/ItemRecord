@@ -1,0 +1,28 @@
+const VM_API = "https://wholesale-arrow-postal-arrival.trycloudflare.com";
+
+export async function onRequestDelete(context) {
+  try {
+    const id = context.params.id;
+    const res = await fetch(`${VM_API}/api/records/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const data = await res.text();
+    return new Response(data, {
+      status: res.status,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: 502,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    });
+  }
+}
+
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
