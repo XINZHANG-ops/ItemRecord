@@ -287,6 +287,17 @@ function isUncategorized(product) {
   return !state.categories.categories.some((c) => itemInCat(product, c));
 }
 
+// 卡片上展示用：商品当前所属的主分类名（优先具体分类 → catchAll 兜底 → 未分类）
+function categoryNameOf(product) {
+  const cfg = state.categories;
+  for (const c of cfg.categories) {
+    if (!c.catchAll && matchKeywords(product.name, c.keywords)) return c.name;
+  }
+  const fallback = cfg.categories.find((c) => c.catchAll);
+  if (fallback) return fallback.name;
+  return cfg.uncategorizedLabel || '未分类';
+}
+
 function countFor(predicate) {
   return state.products.reduce((n, p) => n + (predicate(p) ? 1 : 0), 0);
 }
@@ -395,9 +406,10 @@ function renderGrid() {
     const qty = state.cart.get(p.barcode)?.qty ?? 0;
     const first = (p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0];
     const isNew = p.source === 'custom';
+    const cat = categoryNameOf(p);
     return `
       <div class="card">
-        <div class="card-cover" style="${coverStyle(p.name)}">${esc(first)}${isNew ? '<span class="new-badge">新</span>' : ''}</div>
+        <div class="card-cover" style="${coverStyle(p.name)}"><span class="cover-char">${esc(first)}</span><span class="cover-cat" title="${esc(cat)}">${esc(cat)}</span>${isNew ? '<span class="new-badge">新</span>' : ''}</div>
         <div class="card-body">
           <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
           <div class="card-barcode">${esc(p.barcode)}</div>

@@ -245,13 +245,30 @@ button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
   position: relative;
   height: 96px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 3px;
   font-size: 34px;
   font-weight: 800;
   color: rgba(255, 255, 255, .92);
   text-shadow: 0 1px 2px rgba(0, 0, 0, .12);
   user-select: none;
+}
+.cover-char { line-height: 1; }
+.cover-cat {
+  max-width: 92%;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+  text-shadow: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .new-badge {
@@ -755,7 +772,8 @@ button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
   .brand { font-size: 16px; }
   /* 手机竖屏：每行 3 个，整体缩小但名称仍完整显示 */
   .grid { grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 10px; }
-  .card-cover { height: 68px; font-size: 24px; }
+  .card-cover { height: 68px; font-size: 24px; gap: 2px; }
+  .cover-cat { font-size: 9px; padding: 1px 6px; }
   .card-body { padding: 8px 7px 9px; gap: 4px; }
   .card-name { font-size: 12px; line-height: 1.3; min-height: 31px; }
   .card-barcode { font-size: 10px; }
