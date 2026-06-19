@@ -678,6 +678,13 @@ button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
   color: var(--ink-soft);
   font-size: 14px;
 }
+.import-count {
+  flex: 0 0 auto;
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--brand);
+}
 .import-toolbar { display: flex; justify-content: flex-start; margin-bottom: 8px; flex: 0 0 auto; }
 .import-list {
   flex: 1;

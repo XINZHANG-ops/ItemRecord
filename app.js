@@ -693,7 +693,8 @@ async function confirmAddProduct() {
 }
 
 /* ---------------- 表格批量导入 ---------------- */
-let importRows = [];   // 导入确认弹窗的工作列表 [{name, barcode}]
+let importRows = [];        // 导入确认弹窗的工作列表 [{name, barcode}]
+let importParsedCount = 0;  // AI 本次解析出的原始件数（编辑后仍显示，便于对照）
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -707,6 +708,7 @@ function fileToBase64(file) {
 // 'loading' | 'fail' | 'list'
 function setImportMode(mode) {
   $('#importStatus').hidden = mode === 'list';
+  $('#importCount').hidden = mode !== 'list';
   $('#importList').hidden = mode !== 'list';
   $('#importAddRow').style.display = mode === 'list' ? '' : 'none';
   $('#importConfirm').style.display = mode === 'list' ? '' : 'none';
@@ -736,8 +738,10 @@ async function onImportFileChosen(file) {
       return;
     }
     importRows = res.items.map((it) => ({ name: it.name || '', barcode: it.barcode || '' }));
+    importParsedCount = importRows.length;
     setImportMode('list');
     renderImportList();
+    toast(`AI 解析出 ${importParsedCount} 件商品`);
   } catch (e) {
     $('#importStatus').textContent = '自动添加失败，请联系张信';
     setImportMode('fail');
@@ -746,8 +750,12 @@ async function onImportFileChosen(file) {
 
 function renderImportList() {
   const el = $('#importList');
-  $('#importConfirm').textContent = `确认导入(${importRows.length})`;
-  $('#importConfirm').disabled = importRows.length === 0;
+  const n = importRows.length;
+  $('#importCount').textContent = (n === importParsedCount)
+    ? `AI 解析出 ${importParsedCount} 件商品`
+    : `AI 解析出 ${importParsedCount} 件 · 当前 ${n} 件`;
+  $('#importConfirm').textContent = `确认导入(${n})`;
+  $('#importConfirm').disabled = n === 0;
   el.innerHTML = importRows.map((it, i) => `
     <div class="imp-row">
       <input class="imp-name" data-i="${i}" value="${esc(it.name)}" placeholder="商品名称" />

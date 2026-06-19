@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=17" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -110,6 +110,7 @@
         <button id="importClose" class="ghost-btn">关闭</button>
       </div>
       <p class="modal-sub">AI 已解析出以下商品，可逐条修改/删除，或点「＋ 添加一行」补充。确认后将加入商品库（全设备共享）。</p>
+      <div id="importCount" class="import-count" hidden></div>
       <div id="importStatus" class="import-status">AI 解析中…请稍候</div>
       <div class="import-toolbar">
         <button id="importAddRow" class="ghost-btn">＋ 添加一行</button>
@@ -199,6 +200,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>
