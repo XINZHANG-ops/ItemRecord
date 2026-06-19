@@ -14,9 +14,13 @@
 """
 
 import asyncio
+import base64
+import csv
+import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,7 +35,8 @@ BASE_DIR        = Path("/home/ubuntu/itemrecord")
 RECORDS_FILE    = BASE_DIR / "records.jsonl"
 DELETIONS_FILE  = BASE_DIR / "record_deletions.jsonl"  # append-only 删除事件日志（软删除，溯源用）
 CATEGORIES_FILE = BASE_DIR / "data" / "categories.json"
-PRODUCTS_FILE   = BASE_DIR / "data" / "products.json"
+PRODUCTS_FILE   = BASE_DIR / "data" / "products.json"        # 静态商品目录（种子）
+CUSTOM_PRODUCTS_FILE = BASE_DIR / "custom_products.jsonl"    # append-only 自定义/导入商品，全设备共享
 HISTORY_FILE    = BASE_DIR / "ai_chat_history.json"   # 持久化对话历史
 SCRIPT_FILE     = BASE_DIR / "ai_categorize.py"       # AI 生成的分类脚本（可查看调试）
 CATEGORY_HISTORY_DIR = BASE_DIR / "category_version_history"  # 每版分类快照，纯人工应急查看/回滚用，app 不读
@@ -44,6 +49,7 @@ COMPACT_MODEL   = "kimi-k2.6:cloud"        # 对话历史压缩模型
 
 # ── 锁 ───────────────────────────────────────────────────────────────────────
 _records_lock   = asyncio.Lock()
+_products_lock  = asyncio.Lock()   # 自定义商品 append 串行化
 _ai_lock        = asyncio.Lock()   # 同时只能跑一个 AI 任务
 _compact_event  = asyncio.Event()  # 压缩完成后通知等待的请求
 _compact_event.set()               # 初始状态：未压缩中，可以直接通过
@@ -99,6 +105,30 @@ Python 代码要求：
 - 代码块之后不需要额外解释
 
 重要：keywords 是用于前端实时筛选的，应该是商品名称中实际出现的关键词，不要用太宽泛或太罕见的词。"""
+
+
+# 表格解析 — 主路线 B：AI 对后端已抽取好的二维表 rows 做映射（只用标准库）
+SYSTEM_PROMPT_PARSE_ROWS = """你是一个表格解析助手。
+输入：变量 `rows`，是一个二维列表 list[list[str]]，代表用户上传表格的内容（可能包含横幅标题行、表头行、数据行，单元格可能为空）。
+任务：写一段 Python 代码，从 `rows` 中提取商品清单。
+要求：
+- 只用标准库，不要 import 任何第三方库。
+- 自动跳过非数据行（如横幅标题、表头那一行）。
+- 判断哪一列是商品条码（barcode，通常是较长的数字串），哪一列是商品名称（name）。
+- 清洗：去掉首尾空白；名称为空的行跳过。
+- 把结果赋值给变量 `result`，格式为 list[dict]，每项形如 {"barcode": "...", "name": "..."}。没有条码时 barcode 用空字符串 ""。
+回复格式：先用一句话说明你的判断，然后输出一个 ```python 代码块；代码块之后不要再解释。"""
+
+
+# 表格解析 — 兜底路线 A：B 失败后，把原始文件交给 AI，让它灵活地自己写解析代码
+SYSTEM_PROMPT_PARSE_RAW = """你是一个表格解析助手（高级兜底模式）。简单解析已失败，现在把原始文件交给你，请灵活处理。
+可用变量：
+- FILE_PATH：原始文件在磁盘上的绝对路径（字符串）。
+- FILE_NAME：原始文件名（含扩展名）。
+- RAW_TEXT：若为 CSV/纯文本文件，这里是它的全文字符串；否则为 None。
+你可以 `import openpyxl` 解析 .xlsx（环境已安装），或用标准库 csv 解析 CSV，按文件实际结构灵活提取。
+任务：解析出商品清单，赋值给变量 `result`，格式 list[dict]，每项 {"barcode": "...", "name": "..."}；名称为空的行跳过，无条码用 ""。
+回复格式：先用一句话说明思路，然后输出一个 ```python 代码块；代码块之后不要再解释。"""
 
 
 # ── 对话历史管理 ──────────────────────────────────────────────────────────────
@@ -215,6 +245,66 @@ def _append_deletion(record_id: str, mode: str) -> None:
         f.write(json.dumps(evt, ensure_ascii=False) + "\n")
 
 
+# ── 商品目录（静态种子 + VM 自定义/导入，全设备共享） ──────────────────────────
+def _load_custom_products() -> list[dict]:
+    if not CUSTOM_PRODUCTS_FILE.exists():
+        return []
+    out = []
+    for line in CUSTOM_PRODUCTS_FILE.read_text().splitlines():
+        s = line.strip()
+        if s:
+            try:
+                out.append(json.loads(s))
+            except json.JSONDecodeError:
+                pass
+    return out
+
+
+def _merged_products() -> list[dict]:
+    """catalog 种子 + 自定义商品，按 barcode 去重（catalog 优先）。供前端展示与 AI 分类共用。"""
+    by_bc: dict[str, dict] = {}
+    catalog = json.loads(PRODUCTS_FILE.read_text()) if PRODUCTS_FILE.exists() else []
+    for p in catalog:
+        bc = str(p.get("barcode", "")).strip()
+        if bc and bc not in by_bc:
+            by_bc[bc] = {"barcode": bc, "name": p.get("name", ""), "source": "catalog"}
+    for p in _load_custom_products():
+        bc = str(p.get("barcode", "")).strip()
+        if bc and bc not in by_bc:
+            by_bc[bc] = {"barcode": bc, "name": p.get("name", ""), "source": "custom"}
+    return list(by_bc.values())
+
+
+def _append_custom_products(items: list[dict]) -> tuple[int, int]:
+    """按 barcode+name 去重后追加；空条码自动生成。返回 (added, skipped)。"""
+    seen = {(p["barcode"], p["name"]) for p in _merged_products()}
+    added = skipped = 0
+    CUSTOM_PRODUCTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    with open(CUSTOM_PRODUCTS_FILE, "a") as f:
+        for it in items:
+            name = str(it.get("name", "")).strip()
+            if not name:
+                skipped += 1
+                continue
+            bc = str(it.get("barcode", "")).strip() or f"custom-{stamp}-{added}"
+            if (bc, name) in seen:
+                skipped += 1
+                continue
+            seen.add((bc, name))
+            created_by = str(it.get("createdBy", "")).strip() or None
+            rec = {
+                "barcode": bc,
+                "name": name,
+                "source": "custom",
+                "createdBy": created_by,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            }
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            added += 1
+    return added, skipped
+
+
 # ── 基础路由 ──────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
@@ -249,6 +339,31 @@ async def get_records():
 async def get_records_audit():
     """完整溯源：返回所有记录（含已删）+ 所有删除事件，前端据此画时间线。"""
     return {"records": _read_all_records(), "deletions": _load_deletions()}
+
+
+# ── 商品目录（全设备共享） ─────────────────────────────────────────────────────
+class ProductsAddRequest(BaseModel):
+    items: list[dict] = []
+    password: str = ""
+
+
+@app.get("/api/products")
+async def get_products():
+    """合并后的商品目录（catalog 种子 + 自定义/导入），前端商品来源。"""
+    return _merged_products()
+
+
+@app.post("/api/products")
+async def add_products(req: ProductsAddRequest):
+    """新增/批量导入商品（手输与表格导入共用）。按 barcode+name 去重追加。"""
+    if not _check_pw(req.password):
+        raise HTTPException(status_code=403, detail="密码错误")
+    if not req.items:
+        raise HTTPException(status_code=400, detail="没有要添加的商品")
+    async with _products_lock:
+        added, skipped = _append_custom_products(req.items)
+        total = len(_merged_products())
+    return {"ok": True, "added": added, "skipped": skipped, "total": total}
 
 
 # ── 存货记录（append-only + UUID 幂等） ──────────────────────────────────────
@@ -355,7 +470,7 @@ async def update_categories(req: CategoryUpdateRequest):
         # 等待正在进行的压缩完成（最多等 2 分钟）
         await asyncio.wait_for(_compact_event.wait(), timeout=120)
 
-        products = json.loads(PRODUCTS_FILE.read_text())
+        products = _merged_products()   # catalog 种子 + 导入/自定义商品，AI 分类也认得新导入的
         current_cats = json.loads(CATEGORIES_FILE.read_text()) if CATEGORIES_FILE.exists() else {}
 
         new_cats, stats, error, history = await _run_ai_categorize(
@@ -602,3 +717,205 @@ def _compute_stats(products: list[dict], categories: dict) -> dict:
         "uncategorized": len(uncategorized_names),
         "uncategorized_names": uncategorized_names,
     }
+
+
+# ── 表格批量导入：抽取 + AI 解析（B 主路线 / A 兜底） ──────────────────────────
+def _decode_text(data: bytes) -> str:
+    for enc in ("utf-8-sig", "utf-8", "gbk", "gb18030"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _extract_rows(data: bytes, filename: str) -> list[list[str]]:
+    """把上传文件抽取成二维表（list[list[str]]）。.xlsx 用 openpyxl，.csv 用标准库。"""
+    name = (filename or "").lower()
+    rows: list[list[str]] = []
+    if name.endswith(".csv") or name.endswith(".txt"):
+        text = _decode_text(data)
+        for r in csv.reader(io.StringIO(text)):
+            rows.append([("" if c is None else str(c)).strip() for c in r])
+    elif name.endswith(".xlsx") or name.endswith(".xlsm"):
+        import openpyxl  # 仅后端 venv 需要
+        # 不用 read_only：部分导出文件 worksheet dimension 不准，read_only 会只读到 1 行
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        ws = wb.active
+        for r in ws.iter_rows(values_only=True):
+            rows.append([("" if c is None else str(c)).strip() for c in r])
+        wb.close()
+    else:
+        raise ValueError("不支持的文件类型，请上传 .xlsx 或 .csv")
+    while rows and not any(cell for cell in rows[-1]):
+        rows.pop()
+    return rows
+
+
+def _clean_items(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    items = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        nm = str(it.get("name", "")).strip()
+        if not nm:
+            continue
+        items.append({"barcode": str(it.get("barcode", "")).strip(), "name": nm})
+    return items
+
+
+async def _ollama_chat(messages: list[dict]) -> str:
+    async with httpx.AsyncClient(timeout=180.0) as client:
+        resp = await client.post(OLLAMA_URL, json={
+            "model": MODEL, "messages": messages, "stream": False,
+        })
+    resp.raise_for_status()
+    return resp.json()["message"]["content"]
+
+
+def _exec_parse_wrapper(python_exe: str, wrapper: str) -> tuple[list | None, str | None]:
+    try:
+        proc = subprocess.run([python_exe, "-c", wrapper], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return None, "代码运行超时（30秒）"
+    except Exception as e:
+        return None, str(e)
+    if "__RESULT__" in proc.stdout:
+        try:
+            return json.loads(proc.stdout.split("__RESULT__", 1)[1].strip()), None
+        except json.JSONDecodeError as e:
+            return None, f"结果非合法 JSON：{e}"
+    if "__ERROR__" in proc.stdout:
+        return None, proc.stdout.split("__ERROR__", 1)[1].strip()
+    return None, (proc.stderr or proc.stdout or "无输出").strip()[:500]
+
+
+async def _ai_parse_attempt_rows(rows: list[list[str]]) -> tuple[list | None, str | None]:
+    """主路线 B：AI 对已抽取的二维表 rows 写映射代码（标准库），子进程注入全部 rows。"""
+    preview = rows[:110]
+    note = "" if len(rows) <= 120 else f"\n（仅展示前 110 行，共 {len(rows)} 行；你的代码会作用于全部 rows）"
+    user = (f"表格内容 rows（共 {len(rows)} 行）：\n"
+            f"{json.dumps(preview, ensure_ascii=False)}{note}\n\n请生成解析代码。")
+    try:
+        reply = await _ollama_chat([
+            {"role": "system", "content": SYSTEM_PROMPT_PARSE_ROWS},
+            {"role": "user", "content": user},
+        ])
+    except httpx.TimeoutException:
+        return None, "Ollama 请求超时"
+    except Exception as e:
+        return None, f"Ollama 请求失败：{e}"
+    code = _extract_code(reply)
+    if not code:
+        return None, "AI 未输出 Python 代码块"
+    wrapper = (
+        f"import json\n"
+        f"rows = {json.dumps(rows, ensure_ascii=False)}\n\n"
+        f"{code}\n\n"
+        f"if isinstance(result, list):\n"
+        f"    print('__RESULT__' + json.dumps(result, ensure_ascii=False))\n"
+        f"else:\n"
+        f"    print('__ERROR__result 不是 list')\n"
+    )
+    result, err = _exec_parse_wrapper("python3", wrapper)
+    if err:
+        return None, err
+    items = _clean_items(result)
+    if not items:
+        return None, "未解析出任何商品"
+    return items, None
+
+
+async def _ai_parse_attempt_raw(data: bytes, filename: str, preview: str) -> tuple[list | None, str | None]:
+    """兜底路线 A：把原始文件交给 AI，让它（可用 openpyxl）灵活写解析代码，子进程用 venv python。"""
+    suffix = os.path.splitext(filename or "")[1] or ".bin"
+    raw_text = _decode_text(data) if filename.lower().endswith((".csv", ".txt")) else None
+    tmp = tempfile.NamedTemporaryFile(prefix="itemimport_", suffix=suffix, delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        user = (f"文件名：{filename}\n这是上面那次简单解析失败后的原始文件。预览：\n{preview}\n\n"
+                f"请用代码读取 FILE_PATH（或 RAW_TEXT）解析出商品清单。")
+        try:
+            reply = await _ollama_chat([
+                {"role": "system", "content": SYSTEM_PROMPT_PARSE_RAW},
+                {"role": "user", "content": user},
+            ])
+        except httpx.TimeoutException:
+            return None, "Ollama 请求超时"
+        except Exception as e:
+            return None, f"Ollama 请求失败：{e}"
+        code = _extract_code(reply)
+        if not code:
+            return None, "AI 未输出 Python 代码块"
+        wrapper = (
+            f"import json\n"
+            f"FILE_PATH = {json.dumps(tmp.name)}\n"
+            f"FILE_NAME = {json.dumps(filename)}\n"
+            f"RAW_TEXT = {json.dumps(raw_text)}\n\n"
+            f"{code}\n\n"
+            f"if isinstance(result, list):\n"
+            f"    print('__RESULT__' + json.dumps(result, ensure_ascii=False))\n"
+            f"else:\n"
+            f"    print('__ERROR__result 不是 list')\n"
+        )
+        result, err = _exec_parse_wrapper(sys.executable, wrapper)  # venv python，有 openpyxl
+        if err:
+            return None, err
+        items = _clean_items(result)
+        if not items:
+            return None, "未解析出任何商品"
+        return items, None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+async def _run_ai_parse(rows: list[list[str]], data: bytes, filename: str) -> tuple[list | None, str | None]:
+    """B 主路线失败 → A 兜底（重试一次）。两者都失败返回错误。"""
+    items, err_b = await _ai_parse_attempt_rows(rows)
+    if items is not None:
+        return items, None
+    preview = json.dumps(rows[:40], ensure_ascii=False)
+    items, err_a = await _ai_parse_attempt_raw(data, filename, preview)
+    if items is not None:
+        return items, None
+    return None, f"B 失败：{err_b}；A 兜底失败：{err_a}"
+
+
+class ProductsParseRequest(BaseModel):
+    filename: str = ""
+    dataB64: str = ""
+    password: str = ""
+
+
+@app.post("/api/products/parse")
+async def parse_products(req: ProductsParseRequest):
+    """上传表格 → 抽取 → AI 解析成 [{barcode,name}]。不落库，前端确认后再调 POST /api/products。"""
+    if not _check_pw(req.password):
+        raise HTTPException(status_code=403, detail="密码错误")
+    try:
+        data = base64.b64decode(req.dataB64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="文件解码失败")
+    if not data:
+        raise HTTPException(status_code=400, detail="空文件")
+    try:
+        rows = _extract_rows(data, req.filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"读取表格失败：{e}")
+    if not rows:
+        raise HTTPException(status_code=400, detail="表格是空的")
+
+    async with _ai_lock:
+        items, error = await _run_ai_parse(rows, data, req.filename)
+
+    if error:
+        return {"ok": False, "error": error}
+    return {"ok": True, "items": items}

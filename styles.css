@@ -659,6 +659,59 @@ button { font-family: inherit; cursor: pointer; touch-action: manipulation; }
 .tl-struck .tl-who { color: var(--ink-soft); }
 .tl-struck .tl-items { text-decoration: line-through; opacity: .55; }
 
+/* ---------- 新增商品里的「批量导入」入口 ---------- */
+.add-import-row {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.add-import-or { font-size: 13px; color: var(--ink-soft); }
+
+/* ---------- 批量导入确认弹窗 ---------- */
+.import-status {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.import-toolbar { display: flex; justify-content: flex-start; margin-bottom: 8px; flex: 0 0 auto; }
+.import-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+.imp-row { display: flex; align-items: center; gap: 8px; }
+.imp-row input {
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0 10px;
+  font-size: 16px;            /* ≥16px 防 iOS 聚焦缩放 */
+  outline: none;
+}
+.imp-row input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(67, 97, 238, .12); }
+.imp-name { flex: 1 1 60%; min-width: 0; }
+.imp-bc { flex: 1 1 40%; min-width: 0; font-variant-numeric: tabular-nums; }
+.imp-del {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  color: var(--ink-soft);
+  padding: 6px;
+  border-radius: 6px;
+}
+.imp-del:hover { color: var(--danger); background: #fdecec; }
+
 /* ---------- 轻提示 ---------- */
 .toast {
   position: fixed;

@@ -15,26 +15,45 @@ const store = {
     const res = await fetch('data/products.json');
     return res.json();
   },
-  async fetchCustomProducts() {
-    return JSON.parse(localStorage.getItem('itemrecord.customProducts') || '[]');
-  },
+  // 商品来源改为 VM（全设备共享），仿 fetchCategories 的缓存兜底
   async fetchProducts() {
-    const [catalog, custom] = await Promise.all([this.fetchCatalog(), this.fetchCustomProducts()]);
-    const byCode = new Map();
-    for (const p of catalog) byCode.set(p.barcode, { ...p, source: 'catalog' });
-    for (const p of custom) if (!byCode.has(p.barcode)) byCode.set(p.barcode, p);
-    return [...byCode.values()];
+    try {
+      const res = await fetch('/api/products', { cache: 'no-store' });
+      if (!res.ok) throw new Error('api error');
+      const data = await res.json();
+      localStorage.setItem('itemrecord.products.cache', JSON.stringify({ ts: Date.now(), data }));
+      return data;
+    } catch {
+      const cached = JSON.parse(localStorage.getItem('itemrecord.products.cache') || 'null');
+      if (cached) return cached.data;
+      return this.fetchCatalog();   // 最后兜底：静态种子
+    }
   },
-  async addProduct(product) {
-    const key = 'itemrecord.customProducts';
-    const list = JSON.parse(localStorage.getItem(key) || '[]');
-    const catalog = await this.fetchCatalog();
-    const exists = list.some((p) => p.barcode === product.barcode) ||
-      catalog.some((p) => p.barcode === product.barcode);
-    if (exists) return { ok: false, reason: 'duplicate' };
-    list.push(product);
-    localStorage.setItem(key, JSON.stringify(list));
-    return { ok: true };
+  // 新增/批量导入商品（都走 VM，密码服务端校验）
+  async addProducts(items, password = '') {
+    const res = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();   // { ok, added, skipped, total }
+  },
+  // 上传表格 → AI 解析成 [{barcode,name}]（不落库，前端确认后再 addProducts）
+  async parseProductsFile(filename, dataB64, password = '') {
+    const res = await fetch('/api/products/parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, dataB64, password }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();   // { ok, items } | { ok:false, error }
   },
 
   // 分类从 VM 拉取（AI 改完立即生效），本地只缓存 5 分钟兜底
@@ -627,37 +646,154 @@ function openAddProduct() {
   $('#addPerson').value = localStorage.getItem('itemrecord.lastPerson') || '';
   $('#addOverlay').hidden = false;
   $('#addName').focus();
+  migrateLocalProducts();   // 已通过密码门禁，顺手把旧的本地自定义商品迁移到 VM
 }
 function closeAddProduct() { $('#addOverlay').hidden = true; }
+
+// 一次性迁移：把历史上只存在浏览器 localStorage 的自定义商品上传到 VM 后清掉
+async function migrateLocalProducts() {
+  const key = 'itemrecord.customProducts';
+  let list;
+  try { list = JSON.parse(localStorage.getItem(key) || '[]'); } catch { list = []; }
+  if (!Array.isArray(list) || !list.length) return;
+  try {
+    await store.addProducts(
+      list.map((p) => ({ barcode: p.barcode, name: p.name, createdBy: p.createdBy })),
+      adminPw,
+    );
+    localStorage.removeItem(key);
+    state.products = await loadProducts();
+    renderCategoryBar();
+    renderGrid();
+  } catch { /* 无密码/离线则保留，下次再迁移 */ }
+}
 
 async function confirmAddProduct() {
   const name = $('#addName').value.trim();
   if (!name) { toast('请填写商品名称'); $('#addName').focus(); return; }
-  let barcode = $('#addBarcode').value.trim();
-  if (!barcode) barcode = 'custom-' + Date.now().toString(36);
+  const barcode = $('#addBarcode').value.trim();   // 空则后端自动生成
   const createdBy = $('#addPerson').value.trim();
-
-  const product = {
-    barcode,
-    name,
-    source: 'custom',
-    createdBy: createdBy || null,
-    createdAt: new Date().toISOString(),
-  };
 
   const btn = $('#addConfirm');
   btn.disabled = true;
   try {
-    const res = await store.addProduct(product);
-    if (!res.ok) { toast(res.reason === 'duplicate' ? '该条码已存在' : '保存失败'); return; }
+    const res = await store.addProducts([{ barcode, name, createdBy: createdBy || null }], adminPw);
+    if (!res.added) { toast('该商品已存在'); return; }
     if (createdBy) localStorage.setItem('itemrecord.lastPerson', createdBy);
-    state.products = await loadProducts(); // 重新合并 + 拼音富化，新品立即进入所有视图、分类与拼音搜索
+    state.products = await loadProducts(); // 重新拉取 + 拼音富化，新品立即进入所有视图、分类与拼音搜索
     renderCategoryBar();
     renderGrid();
     closeAddProduct();
     toast('已新增：' + name);
   } catch (e) {
     toast('保存失败，请重试');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------------- 表格批量导入 ---------------- */
+let importRows = [];   // 导入确认弹窗的工作列表 [{name, barcode}]
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+}
+
+// 'loading' | 'fail' | 'list'
+function setImportMode(mode) {
+  $('#importStatus').hidden = mode === 'list';
+  $('#importList').hidden = mode !== 'list';
+  $('#importAddRow').style.display = mode === 'list' ? '' : 'none';
+  $('#importConfirm').style.display = mode === 'list' ? '' : 'none';
+}
+function openImportOverlay(mode) {
+  if ($('#importOverlay').hidden) { $('#importOverlay').hidden = false; lockScroll(); }
+  setImportMode(mode);
+}
+function closeImport() {
+  if (!$('#importOverlay').hidden) unlockScroll();
+  $('#importOverlay').hidden = true;
+  importRows = [];
+}
+
+async function onImportFileChosen(file) {
+  if (!file) return;
+  if (!/\.(xlsx|csv)$/i.test(file.name)) { toast('请选择 .xlsx 或 .csv 文件'); return; }
+  closeAddProduct();
+  openImportOverlay('loading');
+  $('#importStatus').textContent = 'AI 解析中…请稍候';
+  try {
+    const dataB64 = await fileToBase64(file);
+    const res = await store.parseProductsFile(file.name, dataB64, adminPw);
+    if (!res.ok || !Array.isArray(res.items) || !res.items.length) {
+      $('#importStatus').textContent = '自动添加失败，请联系张信';
+      setImportMode('fail');
+      return;
+    }
+    importRows = res.items.map((it) => ({ name: it.name || '', barcode: it.barcode || '' }));
+    setImportMode('list');
+    renderImportList();
+  } catch (e) {
+    $('#importStatus').textContent = '自动添加失败，请联系张信';
+    setImportMode('fail');
+  }
+}
+
+function renderImportList() {
+  const el = $('#importList');
+  $('#importConfirm').textContent = `确认导入(${importRows.length})`;
+  $('#importConfirm').disabled = importRows.length === 0;
+  el.innerHTML = importRows.map((it, i) => `
+    <div class="imp-row">
+      <input class="imp-name" data-i="${i}" value="${esc(it.name)}" placeholder="商品名称" />
+      <input class="imp-bc" data-i="${i}" value="${esc(it.barcode)}" placeholder="条码（可空）" />
+      <button class="imp-del" data-i="${i}" aria-label="删除此行">🗑</button>
+    </div>`).join('');
+  el.querySelectorAll('.imp-name').forEach((inp) =>
+    inp.addEventListener('change', () => { importRows[+inp.dataset.i].name = inp.value; }));
+  el.querySelectorAll('.imp-bc').forEach((inp) =>
+    inp.addEventListener('change', () => { importRows[+inp.dataset.i].barcode = inp.value; }));
+  el.querySelectorAll('.imp-del').forEach((btn) =>
+    btn.addEventListener('click', () => { importRows.splice(+btn.dataset.i, 1); renderImportList(); }));
+}
+
+function addImportRow() {
+  importRows.unshift({ name: '', barcode: '' });
+  renderImportList();
+  const first = $('#importList').querySelector('.imp-name');
+  if (first) first.focus();
+}
+
+async function confirmImport() {
+  const items = importRows
+    .map((it) => ({ name: (it.name || '').trim(), barcode: (it.barcode || '').trim() }))
+    .filter((it) => it.name);
+  if (!items.length) { toast('没有可导入的商品'); return; }
+  // 客户端按 barcode+name 去重（空条码留给后端生成）
+  const seen = new Set();
+  const dedup = [];
+  for (const it of items) {
+    const key = it.barcode + ' ' + it.name;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedup.push(it);
+  }
+  const btn = $('#importConfirm');
+  btn.disabled = true;
+  try {
+    const res = await store.addProducts(dedup, adminPw);
+    state.products = await loadProducts();
+    renderCategoryBar();
+    renderGrid();
+    closeImport();
+    toast(`已导入 ${res.added} 件${res.skipped ? `（跳过 ${res.skipped} 件重复）` : ''}`);
+  } catch (e) {
+    toast(`导入失败：${e.message}`);
   } finally {
     btn.disabled = false;
   }
@@ -1031,6 +1167,13 @@ async function init() {
   $('#addProductBtn').addEventListener('click', () => requirePassword('新增商品需要密码', openAddProduct));
   $('#addCancel').addEventListener('click', closeAddProduct);
   $('#addConfirm').addEventListener('click', confirmAddProduct);
+  // 表格批量导入
+  $('#addImportBtn').addEventListener('click', () => $('#importFileInput').click());
+  $('#importFileInput').addEventListener('change', (e) => { onImportFileChosen(e.target.files[0]); e.target.value = ''; });
+  $('#importAddRow').addEventListener('click', addImportRow);
+  $('#importConfirm').addEventListener('click', confirmImport);
+  $('#importCancel').addEventListener('click', closeImport);
+  $('#importClose').addEventListener('click', closeImport);
   $('#aiCatBtn').addEventListener('click', () => requirePassword('自动分类需要密码', openAiCategories));
   $('#aiCatCancel').addEventListener('click', closeAiCategories);
   $('#aiCatConfirm').addEventListener('click', confirmAiCategories);
@@ -1062,7 +1205,7 @@ async function init() {
   $('#pwOverlay').addEventListener('click', (e) => { if (e.target === $('#pwOverlay')) closePassword(); });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { commitQtyEditor(); closePassword(); closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); }
+    if (e.key === 'Escape') { commitQtyEditor(); closePassword(); closeCart(); closeSubmit(); closeRecords(); closeAddProduct(); closeAiCategories(); closeImport(); }
   });
   $('#personInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmSubmit(); });
 

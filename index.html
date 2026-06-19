@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>库存商品</title>
-  <link rel="stylesheet" href="styles.css?v=15" />
+  <link rel="stylesheet" href="styles.css?v=16" />
 </head>
 <body>
   <!-- 顶部栏 -->
@@ -90,9 +90,34 @@
         <span>添加人（选填）</span>
         <input id="addPerson" type="text" placeholder="你的名字" maxlength="40" />
       </label>
+      <div class="add-import-row">
+        <span class="add-import-or">或：从表格批量导入</span>
+        <button id="addImportBtn" type="button" class="ghost-btn">上传 Excel / CSV</button>
+        <input id="importFileInput" type="file" accept=".xlsx,.csv" hidden />
+      </div>
       <div class="modal-actions" style="margin-top:18px">
         <button id="addCancel" class="ghost-btn">取消</button>
         <button id="addConfirm" class="primary-btn">保存商品</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量导入确认弹窗 -->
+  <div id="importOverlay" class="modal-overlay" hidden>
+    <div class="modal modal-wide" role="dialog" aria-modal="true">
+      <div class="modal-head-row">
+        <h2 class="modal-title">确认导入商品</h2>
+        <button id="importClose" class="ghost-btn">关闭</button>
+      </div>
+      <p class="modal-sub">AI 已解析出以下商品，可逐条修改/删除，或点「＋ 添加一行」补充。确认后将加入商品库（全设备共享）。</p>
+      <div id="importStatus" class="import-status">AI 解析中…请稍候</div>
+      <div class="import-toolbar">
+        <button id="importAddRow" class="ghost-btn">＋ 添加一行</button>
+      </div>
+      <div id="importList" class="import-list" hidden></div>
+      <div class="modal-actions" style="margin-top:14px">
+        <button id="importCancel" class="ghost-btn">取消</button>
+        <button id="importConfirm" class="primary-btn">确认导入(0)</button>
       </div>
     </div>
   </div>
@@ -174,6 +199,6 @@
   <div id="toast" class="toast" hidden></div>
 
   <script src="vendor/pinyin-pro.js"></script>
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>
