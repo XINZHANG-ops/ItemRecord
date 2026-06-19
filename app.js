@@ -263,53 +263,71 @@ function enrichPinyin(products) {
   return products;
 }
 
-// 为每张卡片算一个「最能区分本商品」的两字标签。
-// 只看名字「前段」（逗号/括号/数字=尺码后缀之前），中文二字词按
-// 「词内紧密度 × 独特度」打分：紧密度让 法棍/咖啡 这类真词胜过 棍面/啡杯
-// 这种跨词边界的组合，独特度(idf)再保证它能区分本商品。随列表变化重算。
+// 为每张卡片选一个「最能代表本商品」的 2~3 字词。思路：
+// 1) 只看名字「前段」（逗号/括号/数字=尺码后缀之前）；
+// 2) 浏览器内置 ICU 中文分词 Intl.Segmenter（零依赖、零下载）识别真词作强信号；
+// 3) 对整份目录做 n-gram 统计：反复出现且字紧密绑定的串(如 邦尼兔/三叶草)也算真词，
+//    弥补 ICU 词典缺失；占比过高的通用前缀(如 趣味)排除；
+// 4) 这类商品名里有意义的名词几乎都在词尾，故取最靠右的真词；都没有则取末段尾部两字。
+// 随商品列表变化重算。
 function computeCardTags(products) {
   const CN = /[一-龥]/;
   const head = (name) => {
-    const i = name.search(/[，,（(0-9]/);          // 尺码/数量后缀总以逗号、括号或数字开头
+    const i = name.search(/[，,（(0-9]/);             // 尺码/数量后缀总以逗号、括号或数字开头
     const s = (i === -1 ? name : name.slice(0, i)).trim();
     return s || name;
   };
   const heads = products.map((p) => head(p.name));
-  const cf = new Map(), df = new Map();            // 字符 / 二字词 的文档频率
-  const gramsList = heads.map((h) => {
-    const grams = [];
-    const seenG = new Set(), seenC = new Set();
-    let run = '';
-    const flush = () => {
-      for (let i = 0; i + 1 < run.length; i++) {
-        const g = run.slice(i, i + 2);
-        if (!seenG.has(g)) { seenG.add(g); grams.push(g); }
-      }
-      run = '';
-    };
-    for (const ch of h) {
-      if (CN.test(ch)) {
-        run += ch;
-        if (!seenC.has(ch)) { seenC.add(ch); cf.set(ch, (cf.get(ch) || 0) + 1); }
-      } else flush();
-    }
-    flush();
-    for (const g of grams) df.set(g, (df.get(g) || 0) + 1);
-    return grams;
-  });
   const N = products.length || 1;
-  products.forEach((p, idx) => {
-    let best = null, bestScore = -Infinity;        // 分高者胜；并列保留更靠前的
-    for (const g of gramsList[idx]) {
-      const d = df.get(g);
-      const cohesion = d / Math.max(cf.get(g[0]), cf.get(g[1])); // 0~1，越像真词越接近1
-      const score = cohesion * Math.log(N / d);                  // ×idf：越独特越高
-      if (score > bestScore) { bestScore = score; best = g; }
+
+  // 字符 / 2~3字 n-gram 的文档频率（按名字前段，每名去重）
+  const cf = new Map(), df = new Map();
+  const gramsOf = (h) => {
+    const out = [];
+    for (const r of (h.match(/[一-龥]+/g) || []))
+      for (let k = 2; k <= 3; k++)
+        for (let i = 0; i + k <= r.length; i++) out.push(r.slice(i, i + k));
+    return out;
+  };
+  for (const h of heads) {
+    const sc = new Set();
+    for (const c of h) if (CN.test(c) && !sc.has(c)) { sc.add(c); cf.set(c, (cf.get(c) || 0) + 1); }
+    const sg = new Set();
+    for (const g of gramsOf(h)) if (!sg.has(g)) { sg.add(g); df.set(g, (df.get(g) || 0) + 1); }
+  }
+
+  const icu = new Set();                              // ICU 认得的真词（老浏览器无则为空）
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const seg = new Intl.Segmenter('zh', { granularity: 'word' });
+      for (const h of heads)
+        for (const { segment: w } of seg.segment(h))
+          if ((w.length === 2 || w.length === 3) && [...w].every((c) => CN.test(c))) icu.add(w);
     }
-    if (!best) {                                   // 前段无中文二字词：退回字母/数字，再退首字
-      const h = heads[idx];
-      const m = h.match(/[A-Za-z0-9]{1,2}/);
-      best = m ? m[0] : ((h.match(/[一-龥A-Za-z0-9]/) || ['？'])[0]);
+  } catch (e) { /* 无分词器，仅靠统计 */ }
+
+  const cohesion = (g) => { let p = 1; for (const c of g) p *= cf.get(c); return df.get(g) / Math.pow(p, 1 / g.length); };
+  const isWord = (g) => (df.get(g) / N <= 0.35) && (icu.has(g) || (df.get(g) >= 2 && cohesion(g) >= 0.55));
+
+  products.forEach((p, idx) => {
+    const h = heads[idx];
+    let best = null, bestEnd = -1, bestLen = 0;        // 取最靠右的真词；同末尾偏好更长
+    for (const m of h.matchAll(/[一-龥]+/g)) {
+      const r = m[0], base = m.index;
+      for (let k = 2; k <= 3; k++)
+        for (let i = 0; i + k <= r.length; i++) {
+          const g = r.slice(i, i + k);
+          if (isWord(g)) {
+            const end = base + i + k;
+            if (end > bestEnd || (end === bestEnd && k > bestLen)) { bestEnd = end; bestLen = k; best = g; }
+          }
+        }
+    }
+    if (!best) {                                       // 兜底：末段尾部两字，再退字母/数字/首字
+      const runs = h.match(/[一-龥]+/g);
+      const last = runs ? runs[runs.length - 1] : '';
+      best = last.length >= 2 ? last.slice(-2)
+        : ((h.match(/[A-Za-z0-9]{1,3}/) || [])[0] || (h.match(/[一-龥A-Za-z0-9]/) || ['？'])[0]);
     }
     p.tag = best;
   });
