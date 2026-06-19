@@ -475,7 +475,7 @@ function renderGrid() {
   grid.innerHTML = list.map((p) => {
     const inCart = state.cart.has(p.barcode);
     const qty = state.cart.get(p.barcode)?.qty ?? 0;
-    const isNew = p.source === 'custom';
+    const isNew = p.source === 'custom' && p.createdAt && (Date.now() - new Date(p.createdAt).getTime()) < 3 * 86400000;  // 加入 3 天内才亮「新」
     const cat = categoryNameOf(p);
     return `
       <div class="card">

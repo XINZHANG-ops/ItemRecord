@@ -271,7 +271,7 @@ def _merged_products() -> list[dict]:
     for p in _load_custom_products():
         bc = str(p.get("barcode", "")).strip()
         if bc and bc not in by_bc:
-            by_bc[bc] = {"barcode": bc, "name": p.get("name", ""), "source": "custom"}
+            by_bc[bc] = {"barcode": bc, "name": p.get("name", ""), "source": "custom", "createdAt": p.get("createdAt")}
     return list(by_bc.values())
 
 
