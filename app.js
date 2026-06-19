@@ -263,36 +263,53 @@ function enrichPinyin(products) {
   return products;
 }
 
-// 为每张卡片算一个「最能区分本商品」的两字标签：
-// 对所有名字的中文二字词做 TF-IDF（名字短，tf≈1，等价取文档频率最低=最稀有的词）。
+// 为每张卡片算一个「最能区分本商品」的两字标签。
+// 只看名字「前段」（逗号/括号/数字=尺码后缀之前），中文二字词按
+// 「词内紧密度 × 独特度」打分：紧密度让 法棍/咖啡 这类真词胜过 棍面/啡杯
+// 这种跨词边界的组合，独特度(idf)再保证它能区分本商品。随列表变化重算。
 function computeCardTags(products) {
   const CN = /[一-龥]/;
-  const grams = products.map((p) => {
-    const set = [];
-    const seen = new Set();
+  const head = (name) => {
+    const i = name.search(/[，,（(0-9]/);          // 尺码/数量后缀总以逗号、括号或数字开头
+    const s = (i === -1 ? name : name.slice(0, i)).trim();
+    return s || name;
+  };
+  const heads = products.map((p) => head(p.name));
+  const cf = new Map(), df = new Map();            // 字符 / 二字词 的文档频率
+  const gramsList = heads.map((h) => {
+    const grams = [];
+    const seenG = new Set(), seenC = new Set();
     let run = '';
     const flush = () => {
       for (let i = 0; i + 1 < run.length; i++) {
         const g = run.slice(i, i + 2);
-        if (!seen.has(g)) { seen.add(g); set.push(g); }
+        if (!seenG.has(g)) { seenG.add(g); grams.push(g); }
       }
       run = '';
     };
-    for (const ch of p.name) { if (CN.test(ch)) run += ch; else flush(); }
-    flush();
-    return set;
-  });
-  const df = new Map();
-  for (const set of grams) for (const g of set) df.set(g, (df.get(g) || 0) + 1);
-  products.forEach((p, idx) => {
-    let best = null, bestDf = Infinity;          // df 最小者最独特；并列保留更靠前的
-    for (const g of grams[idx]) {
-      const d = df.get(g);
-      if (d < bestDf) { bestDf = d; best = g; }
+    for (const ch of h) {
+      if (CN.test(ch)) {
+        run += ch;
+        if (!seenC.has(ch)) { seenC.add(ch); cf.set(ch, (cf.get(ch) || 0) + 1); }
+      } else flush();
     }
-    if (!best) {                                 // 名字无中文二字词：退回字母/数字，再退首字
-      const m = p.name.match(/[A-Za-z0-9]{1,2}/);
-      best = m ? m[0] : ((p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0]);
+    flush();
+    for (const g of grams) df.set(g, (df.get(g) || 0) + 1);
+    return grams;
+  });
+  const N = products.length || 1;
+  products.forEach((p, idx) => {
+    let best = null, bestScore = -Infinity;        // 分高者胜；并列保留更靠前的
+    for (const g of gramsList[idx]) {
+      const d = df.get(g);
+      const cohesion = d / Math.max(cf.get(g[0]), cf.get(g[1])); // 0~1，越像真词越接近1
+      const score = cohesion * Math.log(N / d);                  // ×idf：越独特越高
+      if (score > bestScore) { bestScore = score; best = g; }
+    }
+    if (!best) {                                   // 前段无中文二字词：退回字母/数字，再退首字
+      const h = heads[idx];
+      const m = h.match(/[A-Za-z0-9]{1,2}/);
+      best = m ? m[0] : ((h.match(/[一-龥A-Za-z0-9]/) || ['？'])[0]);
     }
     p.tag = best;
   });
