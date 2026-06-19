@@ -263,9 +263,45 @@ function enrichPinyin(products) {
   return products;
 }
 
-// 合并 + 拼音富化，单一入口
+// 为每张卡片算一个「最能区分本商品」的两字标签：
+// 对所有名字的中文二字词做 TF-IDF（名字短，tf≈1，等价取文档频率最低=最稀有的词）。
+function computeCardTags(products) {
+  const CN = /[一-龥]/;
+  const grams = products.map((p) => {
+    const set = [];
+    const seen = new Set();
+    let run = '';
+    const flush = () => {
+      for (let i = 0; i + 1 < run.length; i++) {
+        const g = run.slice(i, i + 2);
+        if (!seen.has(g)) { seen.add(g); set.push(g); }
+      }
+      run = '';
+    };
+    for (const ch of p.name) { if (CN.test(ch)) run += ch; else flush(); }
+    flush();
+    return set;
+  });
+  const df = new Map();
+  for (const set of grams) for (const g of set) df.set(g, (df.get(g) || 0) + 1);
+  products.forEach((p, idx) => {
+    let best = null, bestDf = Infinity;          // df 最小者最独特；并列保留更靠前的
+    for (const g of grams[idx]) {
+      const d = df.get(g);
+      if (d < bestDf) { bestDf = d; best = g; }
+    }
+    if (!best) {                                 // 名字无中文二字词：退回字母/数字，再退首字
+      const m = p.name.match(/[A-Za-z0-9]{1,2}/);
+      best = m ? m[0] : ((p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0]);
+    }
+    p.tag = best;
+  });
+  return products;
+}
+
+// 合并 + 拼音富化 + 卡片标签，单一入口
 async function loadProducts() {
-  return enrichPinyin(await store.fetchProducts());
+  return computeCardTags(enrichPinyin(await store.fetchProducts()));
 }
 
 /* ---------------- 分类 ---------------- */
@@ -404,12 +440,11 @@ function renderGrid() {
   grid.innerHTML = list.map((p) => {
     const inCart = state.cart.has(p.barcode);
     const qty = state.cart.get(p.barcode)?.qty ?? 0;
-    const first = (p.name.match(/[一-龥A-Za-z0-9]/) || ['？'])[0];
     const isNew = p.source === 'custom';
     const cat = categoryNameOf(p);
     return `
       <div class="card">
-        <div class="card-cover" style="${coverStyle(p.name)}"><span class="cover-char">${esc(first)}</span><span class="cover-cat" title="${esc(cat)}">${esc(cat)}</span>${isNew ? '<span class="new-badge">新</span>' : ''}</div>
+        <div class="card-cover" style="${coverStyle(p.name)}"><span class="cover-char">${esc(p.tag || '')}</span><span class="cover-cat" title="${esc(cat)}">${esc(cat)}</span>${isNew ? '<span class="new-badge">新</span>' : ''}</div>
         <div class="card-body">
           <div class="card-name" title="${esc(p.name)}">${esc(p.name)}</div>
           <div class="card-barcode">${esc(p.barcode)}</div>
